@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# ── UI 시스템 (Clack 스타일 트랙라인 + Catppuccin Mocha) ──
+# UI system (Clack-style trackline + Catppuccin Mocha palette)
 
-# Catppuccin Mocha
+# Catppuccin Mocha colors
 C_MAUVE="#cba6f7"
 C_BLUE="#89b4fa"
 C_GREEN="#a6e3a1"
@@ -17,9 +17,9 @@ C_LAVENDER="#b4befe"
 C_PINK="#f5c2e7"
 C_TEAL="#94e2d5"
 
-# ── 그라디언트 ASCII 로고 ──
+# Gradient ASCII logo
 show_logo() {
-  # Catppuccin 그라디언트 (mauve → blue → teal)
+  # Catppuccin gradient (mauve → blue → teal)
   local colors=("$C_MAUVE" "$C_MAUVE" "$C_LAVENDER" "$C_BLUE" "$C_BLUE" "$C_TEAL")
   local lines=(
     '  ███╗   ███╗ █████╗  ██████╗   ██████╗ ███████╗██╗   ██╗'
@@ -37,8 +37,8 @@ show_logo() {
   echo ""
 }
 
-# ── Clack 스타일 트랙라인 ──
-# 심볼: ◆ 현재 활성, ◇ 완료됨, │ 연결선, ■ 종료
+# Clack-style trackline
+# Symbols: ◆ active, ◇ done, │ connector, ■ end
 
 track_bar() {
   gum style --foreground "$C_SURFACE" "  │"
@@ -96,7 +96,7 @@ track_cancel() {
   echo ""
 }
 
-# ── 기존 호환 함수 ──
+# Backward-compatible aliases
 ui_header() {
   echo ""
   gum style --foreground "$C_MAUVE" --bold "  ◆  $1"
@@ -170,7 +170,9 @@ ui_summary_box() {
 
 ui_error_action() {
   local pkg=$1
-  track_error "Failed: $pkg"
+  # Side effects (error banner) go to stderr so the caller's
+  # `action=$(ui_error_action "$pkg")` captures only the user's choice.
+  track_error "Failed: $pkg" 1>&2
   gum choose --header "  │  What to do?" \
     --header.foreground "$C_YELLOW" \
     --cursor.foreground "$C_MAUVE" \

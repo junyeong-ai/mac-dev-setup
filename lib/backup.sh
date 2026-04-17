@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ── 기존 설정 백업 ──
+# Backup existing dotfiles before modification
 
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d_%H%M%S)"
 
