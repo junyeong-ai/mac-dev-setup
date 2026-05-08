@@ -6,7 +6,7 @@
 #     ├─ looks up INSTALLER + ARGS in registry
 #     ├─ calls install_<INSTALLER> "$key" <args...>
 #     └─ on non-zero exit, iterative retry/skip/abort prompt
-#                          (interactive only; auto-skip in CI/non-TTY)
+#                          (interactive only; fail in CI/non-TTY)
 #
 # Naming convention:
 #   ensure_*        bootstrap primitive (public; used before gum is available)
@@ -24,19 +24,59 @@ LOG_FILE="${LOG_FILE:-$HOME/.mac-dev-setup.log}"
 
 # ── Bootstrap (runs before gum is available) ──
 
+ensure_supported_system() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    echo "Error: macOS required." >&2
+    exit 1
+  fi
+
+  if [ "$(uname -m)" != "arm64" ]; then
+    echo "Error: Apple Silicon Mac required." >&2
+    exit 1
+  fi
+}
+
+activate_homebrew() {
+  if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    return 0
+  fi
+  return 1
+}
+
+activate_mise() {
+  if command -v mise &>/dev/null; then
+    local activation
+    activation=$(mise activate --shims --quiet bash 2>/dev/null) || return 1
+    eval "$activation" || return 1
+    return 0
+  fi
+  return 1
+}
+
 # Ensure Homebrew exists. Uses plain echo because gum/tracking UI may not
 # be installed yet. Idempotent.
 ensure_homebrew() {
-  if command -v brew &>/dev/null; then
+  if activate_homebrew; then
     return 0
   fi
+
   echo "Installing Homebrew (first-time setup)..."
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" >> "$LOG_FILE" 2>&1
-  if [ -f /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+  if activate_homebrew; then
     echo "Homebrew installed."
   else
     echo "Homebrew installation failed — check $LOG_FILE" >&2
+    exit 1
+  fi
+}
+
+ensure_homebrew_metadata() {
+  echo "Updating Homebrew package metadata..."
+  if brew update >> "$LOG_FILE" 2>&1; then
+    echo "Homebrew metadata updated."
+  else
+    echo "Homebrew update failed — check $LOG_FILE" >&2
     exit 1
   fi
 }
@@ -89,10 +129,10 @@ install_key() {
       return 0
     fi
 
-    # Non-interactive: auto-skip on failure
+    # Non-interactive: fail clearly instead of hiding partial setup.
     if [ ! -t 0 ] || [ "${CI_MODE:-}" = "true" ]; then
-      track_warn "Skipped $short (non-interactive)"
-      return 0
+      track_error "Failed $short (non-interactive)"
+      return 1
     fi
 
     local action
@@ -111,51 +151,69 @@ install_key() {
 # Brew formula: install_brew <key> <pkg>
 install_brew() {
   local key=$1 pkg=$2
-  local label short
+  local label short check action
   label=$(reg_field "$key" label)
   short="${label%% (*}"
+  check=$(reg_field "$key" check)
 
-  if brew list "$pkg" &>/dev/null 2>&1; then
+  if [ -n "$check" ] && eval "$check" &>/dev/null; then
     track_success "$short"
     return 0
   fi
+  if [ -z "$check" ] && brew list --formula "$pkg" &>/dev/null 2>&1; then
+    track_success "$short"
+    return 0
+  fi
+
+  if brew list --formula "$pkg" &>/dev/null 2>&1; then
+    action=reinstall
+  else
+    action=install
+  fi
+
   track_active "$short..."
-  if brew install "$pkg" >> "$LOG_FILE" 2>&1; then
-    printf "\033[1A\033[2K"
+  if brew "$action" "$pkg" >> "$LOG_FILE" 2>&1; then
+    _clear_active_line
     track_success "$short"
     return 0
   fi
-  printf "\033[1A\033[2K"
+  _clear_active_line
   track_error "$short"
   return 1
 }
 
-# Brew cask: install_brew_cask <key> <cask> [app_name tokens...]
-# App name with spaces is reassembled from trailing tokens.
+# Brew cask: install_brew_cask <key> <cask>
+# Registry CHECK owns the app/font health test; brew ownership decides
+# whether repair uses install or reinstall.
 install_brew_cask() {
   local key=$1 cask=$2
-  shift 2
-  local app_name="$*"
-  local label short
+  local label short check action
   label=$(reg_field "$key" label)
   short="${label%% (*}"
+  check=$(reg_field "$key" check)
 
-  if brew list --cask "$cask" &>/dev/null 2>&1; then
+  if [ -n "$check" ] && eval "$check" &>/dev/null; then
     track_success "$short"
     return 0
   fi
-  if [ -n "$app_name" ] && [ -d "/Applications/${app_name}.app" ]; then
+  if [ -z "$check" ] && brew list --cask "$cask" &>/dev/null 2>&1; then
     track_success "$short"
     return 0
+  fi
+
+  if brew list --cask "$cask" &>/dev/null 2>&1; then
+    action=reinstall
+  else
+    action=install
   fi
 
   track_active "$short..."
-  if brew install --cask "$cask" >> "$LOG_FILE" 2>&1; then
-    printf "\033[1A\033[2K"
+  if brew "$action" --cask "$cask" >> "$LOG_FILE" 2>&1; then
+    _clear_active_line
     track_success "$short"
     return 0
   fi
-  printf "\033[1A\033[2K"
+  _clear_active_line
   track_error "$short"
   return 1
 }
@@ -164,31 +222,40 @@ install_brew_cask() {
 # Self-bootstraps mise if missing so selection order doesn't matter.
 install_mise() {
   local key=$1 spec=$2
-  local label short
+  local label short check
   label=$(reg_field "$key" label)
   short="${label%% (*}"
+  check=$(reg_field "$key" check)
 
   if ! command -v mise &>/dev/null; then
     track_active "mise (bootstrap)..."
     if brew install mise >> "$LOG_FILE" 2>&1; then
-      printf "\033[1A\033[2K"
+      _clear_active_line
       track_success "mise (bootstrap)"
     else
-      printf "\033[1A\033[2K"
+      _clear_active_line
       track_error "mise bootstrap failed — skipping $short"
       return 1
     fi
   fi
 
+  activate_mise || true
+
+  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+    track_success "$short"
+    return 0
+  fi
+
   track_active "$short (via mise)..."
   # Pass spec as positional arg to bash -c so it can't be re-interpreted as
   # a shell command even if the registry is ever extended with untrusted data.
-  if bash -c 'eval "$(mise activate bash)" && mise use -g "$1"' _ "$spec" >> "$LOG_FILE" 2>&1; then
-    printf "\033[1A\033[2K"
+  if bash -c 'eval "$(mise activate --shims --quiet bash)" && mise use -g "$1"' _ "$spec" >> "$LOG_FILE" 2>&1; then
+    activate_mise || true
+    _clear_active_line
     track_success "$short (via mise)"
     return 0
   fi
-  printf "\033[1A\033[2K"
+  _clear_active_line
   track_error "$short (via mise)"
   return 1
 }
@@ -197,15 +264,20 @@ install_mise() {
 # Self-bootstraps Node via mise if npm is missing.
 install_npm() {
   local key=$1 pkg=$2
-  local label short
+  local label short check
   label=$(reg_field "$key" label)
   short="${label%% (*}"
+  check=$(reg_field "$key" check)
+
+  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+    track_success "$short"
+    return 0
+  fi
 
   if ! command -v npm &>/dev/null; then
     track_warn "npm not found — bootstrapping Node.js via mise"
     install_mise node node@lts || return 1
-    # Activate mise in current shell so npm becomes findable
-    command -v mise &>/dev/null && eval "$(mise activate bash)" 2>/dev/null || true
+    activate_mise || true
   fi
 
   if ! command -v npm &>/dev/null; then
@@ -215,11 +287,11 @@ install_npm() {
 
   track_active "$short (npm -g)..."
   if npm install -g "$pkg" >> "$LOG_FILE" 2>&1; then
-    printf "\033[1A\033[2K"
+    _clear_active_line
     track_success "$short"
     return 0
   fi
-  printf "\033[1A\033[2K"
+  _clear_active_line
   track_error "$short"
   return 1
 }
@@ -240,13 +312,75 @@ install_zinit() {
   track_active "$short..."
   mkdir -p "$HOME/.local/share/zinit"
   if git clone https://github.com/zdharma-continuum/zinit "$target" >> "$LOG_FILE" 2>&1; then
-    printf "\033[1A\033[2K"
+    _clear_active_line
     track_success "$short"
     return 0
   fi
-  printf "\033[1A\033[2K"
+  _clear_active_line
   track_error "$short"
   return 1
+}
+
+_clear_active_line() {
+  [ -t 1 ] && printf "\033[1A\033[2K"
+}
+
+install_git_defaults() {
+  local key=$1
+  _git_config_default init.defaultBranch main
+  _git_config_default pull.rebase true
+  _git_config_default fetch.prune true
+  _git_config_default rerere.enabled true
+  track_success "$(reg_field "$key" label)"
+  return 0
+}
+
+install_git_lfs() {
+  local key=$1
+  local label short check action
+  label=$(reg_field "$key" label)
+  short="${label%% (*}"
+  check=$(reg_field "$key" check)
+
+  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+    track_success "$short"
+    return 0
+  fi
+
+  if ! brew list --formula git-lfs &>/dev/null || ! command -v git-lfs &>/dev/null; then
+    if brew list --formula git-lfs &>/dev/null 2>&1; then
+      action=reinstall
+    else
+      action=install
+    fi
+
+    track_active "$short..."
+    if brew "$action" git-lfs >> "$LOG_FILE" 2>&1; then
+      _clear_active_line
+      track_success "$short"
+    else
+      _clear_active_line
+      track_error "$short"
+      return 1
+    fi
+  fi
+
+  track_active "$short setup..."
+  if git lfs install --skip-repo >> "$LOG_FILE" 2>&1; then
+    _clear_active_line
+    track_success "$short setup"
+    return 0
+  fi
+  _clear_active_line
+  track_error "$short setup"
+  return 1
+}
+
+_git_config_default() {
+  local key=$1 value=$2
+  if ! git config --global "$key" &>/dev/null; then
+    git config --global "$key" "$value"
+  fi
 }
 
 # ── macOS settings (one function per key) ──
@@ -258,6 +392,7 @@ install_macos_keyrepeat() {
   defaults write NSGlobalDomain KeyRepeat -int 2
   defaults write NSGlobalDomain InitialKeyRepeat -int 15
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_finder_hidden() {
@@ -265,6 +400,7 @@ install_macos_finder_hidden() {
   defaults write com.apple.finder AppleShowAllFiles YES
   _macos_needs_finder_restart=true
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_finder_pathbar() {
@@ -272,6 +408,7 @@ install_macos_finder_pathbar() {
   defaults write com.apple.finder ShowPathbar -bool true
   _macos_needs_finder_restart=true
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_dock() {
@@ -281,6 +418,7 @@ install_macos_dock() {
   defaults write com.apple.dock autohide-time-modifier -float 0.3
   _macos_needs_dock_restart=true
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_mission_control() {
@@ -288,6 +426,7 @@ install_macos_mission_control() {
   defaults write com.apple.dock expose-animation-duration -float 0.1
   _macos_needs_dock_restart=true
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_screenshots() {
@@ -295,12 +434,14 @@ install_macos_screenshots() {
   mkdir -p "$HOME/Screenshots"
   defaults write com.apple.screencapture location "$HOME/Screenshots"
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 install_macos_hushlogin() {
   local key=$1
   touch "$HOME/.hushlogin"
   track_success "$(reg_field "$key" label)"
+  return 0
 }
 
 # Restart Finder/Dock after macOS defaults changes. Orchestrator calls this

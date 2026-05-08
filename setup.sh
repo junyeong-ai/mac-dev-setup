@@ -32,7 +32,6 @@ trap 'echo ""; echo "Interrupted." >&2; exit 130' INT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$HOME/.mac-dev-setup.log"
-: > "$LOG_FILE"
 
 for lib in ui registry backup installers configs orchestrator doctor; do
   # shellcheck disable=SC1090
@@ -63,24 +62,32 @@ See also: README.md
 HELP
 }
 
+init_log_file() {
+  : > "$LOG_FILE"
+}
+
 main() {
   # Pre-subcommand handling (no bootstrap needed for --help)
   case "${1:-}" in
     -h|--help) print_help; exit 0 ;;
   esac
 
-  # Bootstrap is shared by all subcommands that interact with UI.
-  run_bootstrap
-
   case "${1:-}" in
     doctor|--doctor)
+      ensure_supported_system
+      activate_homebrew || true
+      activate_mise || true
       run_doctor
       ;;
     --ci)
-      CI_MODE=true
+      export CI_MODE=true
+      init_log_file
+      run_bootstrap install
       run_install
       ;;
     ""|install)
+      init_log_file
+      run_bootstrap install
       run_install
       ;;
     *)

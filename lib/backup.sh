@@ -8,17 +8,21 @@ backup_configs() {
     "$HOME/.zshrc"
     "$HOME/.zprofile"
     "$HOME/.gitconfig"
+    "$HOME/.hushlogin"
     "$HOME/.config/ghostty/config"
     "$HOME/.config/starship.toml"
     "$HOME/.config/bat/config"
     "$HOME/.config/lazygit/config.yml"
+    "$HOME/.config/nvim/init.lua"
+    "$HOME/.config/nvim/lua/plugins/catppuccin.lua"
   )
 
   local count=0
   for f in "${files[@]}"; do
     if [ -f "$f" ]; then
-      local rel="${f#$HOME/}"
-      local dir="$BACKUP_DIR/$(dirname "$rel")"
+      local rel dir
+      rel="${f#"$HOME"/}"
+      dir="$BACKUP_DIR/$(dirname "$rel")"
       mkdir -p "$dir"
       cp "$f" "$BACKUP_DIR/$rel"
       count=$((count + 1))
