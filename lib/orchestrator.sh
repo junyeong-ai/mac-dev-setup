@@ -200,24 +200,54 @@ _append_key_with_dependencies() {
 
 _show_summary() {
   local selected_keys_text=$1
-  track_bar
-  gum style --foreground "$C_BLUE" --bold "  ◇  Installation Summary"
-  track_bar
+  _summary_line "  │"
+  _summary_line "  ◇  Installation Summary"
+  _summary_line "  │"
 
   local -a types
   while IFS= read -r t; do [ -n "$t" ] && types+=("$t"); done < <(reg_types)
 
   local total=0
-  local t count
+  local t count title
   for t in "${types[@]}"; do
-    count=$(echo "$selected_keys_text" | while IFS= read -r k; do
-      [ -n "$k" ] && [ "$(reg_field "$k" type)" = "$t" ] && echo "$k"
-    done | wc -l | tr -d ' ')
+    count=$(_count_selected_keys_by_type "$selected_keys_text" "$t")
     total=$((total + count))
-    [ "$count" -gt 0 ] && track_info "$(type_log_title "$t"): $count"
+    if [ "$count" -gt 0 ]; then
+      title=$(type_log_title "$t")
+      _summary_count_line "$title:" "$count"
+    fi
   done
-  track_bar
-  track_info "Total: $total"
+  _summary_line "  │"
+  _summary_count_line "Total:" "$total"
+}
+
+_count_selected_keys_by_type() {
+  local selected_keys_text=$1 want_type=$2
+  local count=0 k
+  while IFS= read -r k; do
+    [ -z "$k" ] && continue
+    if [ "$(reg_field "$k" type)" = "$want_type" ]; then
+      count=$((count + 1))
+    fi
+  done <<< "$selected_keys_text"
+  echo "$count"
+}
+
+_summary_line() {
+  if [ -t 1 ] || [ -t 2 ]; then
+    printf "%s\n" "$1" > /dev/tty
+  else
+    printf "%s\n" "$1" >&2
+  fi
+}
+
+_summary_count_line() {
+  local label=$1 count=$2
+  if [ -t 1 ] || [ -t 2 ]; then
+    printf "  │  %-18s %s\n" "$label" "$count" > /dev/tty
+  else
+    printf "  │  %-18s %s\n" "$label" "$count" >&2
+  fi
 }
 
 # ── Execution ──
