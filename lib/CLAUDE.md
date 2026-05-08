@@ -6,7 +6,7 @@ Loaded when Claude reads files in this directory. See `../CLAUDE.md` for project
 
 | File | Public API |
 |------|------------|
-| `registry.sh` | `REGISTRY` array, `reg_keys`, `reg_keys_by_type`, `reg_keys_by_tier`, `reg_field`, `reg_default_keys`, `reg_types`, `type_ui_title`, `type_log_title`, `validate_registry` |
+| `registry.sh` | `REGISTRY` array, `reg_keys`, `reg_keys_by_type`, `reg_keys_by_tier`, `reg_field`, `reg_check_passes`, `reg_default_keys`, `reg_types`, `type_ui_title`, `type_log_title`, `validate_registry` |
 | `installers.sh` | `ensure_supported_system`, `activate_homebrew`, `activate_mise`, `ensure_homebrew`, `ensure_homebrew_metadata`, `ensure_gum`, `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_git_lfs`, `install_macos_*` |
 | `orchestrator.sh` | `run_bootstrap`, `run_install` |
 | `doctor.sh` | `run_doctor` |
@@ -21,8 +21,9 @@ Every function whose name matches `install_<TOKEN>` — including `install_macos
 1. **Accept `(key, arg1, arg2, ...)`**. The first argument is the registry key.
 2. **Be idempotent**. Check for already-installed before doing work; if so, emit `track_success` and return 0.
 3. **Resolve labels via registry**: `label=$(reg_field "$key" label)`; never hardcode the display string.
-4. **Log to `$LOG_FILE`**: redirect stdout + stderr of install commands with `>> "$LOG_FILE" 2>&1`.
-5. **Return discipline**: `return 0` on success, non-zero on failure. Do not call `exit`, do not call `_handle_failure` or any retry logic — `install_key` owns recovery.
+4. **Log long-running package commands to `$LOG_FILE`**: redirect stdout + stderr of Homebrew, mise, npm, git clone, and setup commands with `>> "$LOG_FILE" 2>&1`.
+5. **Verify through the registry**: after mutating package/config state, call `_finish_registry_key "$key" "$label"` or a wrapper such as `_finish_macos_setting "$key"` so `reg_check_passes` is the success criterion.
+6. **Return discipline**: `return 0` on success, non-zero on failure. Do not call `exit`, do not call `_handle_failure` or any retry logic — `install_key` owns recovery.
 
 ## Dispatch mechanics
 
@@ -56,16 +57,19 @@ macOS installers may set globals (`_macos_needs_finder_restart`, `_macos_needs_d
 `deploy_configs <keys>` runs after tool installation. Key behaviors:
 
 - **`.zshrc`**: extracts content between `# >>> user-managed >>>` / `# <<< user-managed <<<` from the existing file, copies the template, re-injects the preserved block. Never overwrites user customizations in that region.
+- **`.zprofile`**: owns only the Homebrew shellenv block between `# >>> mac-dev-setup: homebrew >>>` / `# <<< mac-dev-setup: homebrew <<<`. Existing unmarked `/opt/homebrew/bin/brew shellenv` lines are normalized into that block while unrelated lines are preserved.
 - **Ghostty / Starship / bat / lazygit**: deployed only if the corresponding key was selected and the binary/app is available.
 - **Git**: baseline defaults are handled by the `git_defaults` registry key. Delta-specific settings are added only when `git_delta` was selected and `delta` is installed. Git LFS has its own installer because it requires global filter initialization after the binary is installed.
 - **Neovim**: managed only when the `neovim` key is selected. A fresh config gets LazyVim starter; an existing non-LazyVim config is left untouched.
 
 ## Doctor
 
-`run_doctor` walks the registry and evaluates each `CHECK` expression with `eval`. Empty CHECK falls back to `command -v $key` for types `cli | git | runtime | ai`. Types without a command-equivalent (shell, font, app, macos) must provide an explicit CHECK. `DEPS` affects install order only; doctor reports the state of each registry key independently. Config diagnostics check managed markers/theme patterns, so a file can be present but reported as outdated.
+`run_doctor` walks the registry through `reg_check_passes`. Empty CHECK falls back to `command -v $key` for types `cli | git | runtime | ai`. Types without a command-equivalent (shell, font, app, macos) must provide an explicit CHECK. `DEPS` affects install order only. Doctor reports `essential` and `recommended` failures as missing baseline items; failed `extra` checks are neutral optional rows. Config diagnostics check managed markers/theme patterns, so a file can be present but reported as outdated.
 
 ## When adding a new installer token
 
 1. Add `install_<TOKEN>` to `installers.sh` following the contract above.
 2. Add a registry record pointing to it.
 3. On next run, `validate_registry` confirms schema validity, dependency graph validity, and the dispatch link at startup.
+
+Keep registry labels comma-free. The interactive selector passes default labels to gum as one comma-separated value, and `validate_registry` enforces this UI contract.

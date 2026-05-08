@@ -19,7 +19,7 @@ Everything is driven by a single `REGISTRY` array in `lib/registry.sh`. Each rec
 - **`--ci` mode** installs the same default set with no prompt.
 - **`install_key <key>`** resolves `INSTALLER` + `ARGS` from the registry and dispatches to `install_<INSTALLER>`.
 - **Dependency expansion** installs registry `DEPS` before the selected key.
-- **`doctor`** walks the registry and evaluates each record's `CHECK` expression.
+- **Verification** uses `reg_check_passes`, so installers and `doctor` share each record's `CHECK` expression. `extra` failures are optional, while `essential` and `recommended` failures are baseline drift.
 - **Schema is validated at startup** by `validate_registry` — malformed records, duplicate keys, invalid enums, dependency errors, and broken dispatch links abort before any work runs.
 
 Registry record shape (8 pipe-separated fields):
@@ -63,7 +63,9 @@ Then startup validation catches any typo. Everything else (UI, CI, doctor) picks
 
 - **User-facing strings in Korean**: gum labels, registry `LABEL` field, selection prompts. Everything else (code, comments, log output, section headers, function names) is English.
 - **`.zshrc` user-managed block**: the template contains `# >>> user-managed >>>` / `# <<< user-managed <<<` markers. `lib/configs.sh` preserves everything between them across re-runs. Never put managed content inside these markers.
+- **`.zprofile` Homebrew block**: `lib/configs.sh` normalizes `/opt/homebrew/bin/brew shellenv` into the managed mac-dev-setup block and preserves unrelated shell initialization.
 - **Registry field separator**: `|` is forbidden inside any field. Pipes in CHECK expressions cause false positives (pipeline exit code is the last command's). Use `&>/dev/null` instead of `| head -1`.
+- **Registry labels**: `LABEL` must not contain `,` because gum receives selected defaults as a comma-separated value.
 - **Catppuccin Mocha** is applied by `lib/configs.sh` to each selected config file that is deployed. It is not a user-selectable option.
 - **Bash 3.2 target**: macOS ships bash 3.2. No associative arrays (`declare -A`), no namerefs (`declare -n`), no `mapfile`/`readarray`.
 

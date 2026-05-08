@@ -16,7 +16,7 @@ bash setup.sh
 - **User-managed .zshrc block** — customizations between `# >>> user-managed >>>` / `# <<< user-managed <<<` markers are preserved on re-deploy.
 - **Auto-backup** — existing dotfiles saved to `~/.dotfiles-backup/` before any changes.
 - **CI mode** — `bash setup.sh --ci` installs `essential + recommended` non-interactively and fails on install errors.
-- **Doctor** — `bash setup.sh doctor` walks the registry without changing package state and reports installed tools, config drift, theme consistency, and git checks.
+- **Doctor** — `bash setup.sh doctor` walks the registry without changing package state, reports baseline drift as missing, and marks uninstalled `extra` tools as optional.
 - **Bootstrap scope** — refreshes Homebrew package metadata once, then installs missing selected tools from current Homebrew, mise, and npm stable/LTS channels. Registry dependencies are added automatically so first-run setup order is deterministic.
 
 ## Architecture
@@ -58,7 +58,9 @@ KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | DEPS | CHECK
 | `ARGS` | Whitespace-separated arguments to the installer |
 | `TIER` | `essential` · `recommended` · `extra` |
 | `DEPS` | Whitespace-separated registry keys that must install first |
-| `CHECK` | Shell expression for doctor (empty = type default) |
+| `CHECK` | Shell expression for installer and doctor verification (empty = type default) |
+
+`LABEL` must not contain `,`; the interactive selector passes default labels to gum as a comma-separated value and `validate_registry` enforces that contract.
 
 ### Installer dispatch
 
@@ -127,6 +129,8 @@ That's it. The option now appears in:
 - Dependency expansion (if another selected key lists it in `DEPS`)
 - The doctor output (using the `CHECK` expression)
 
+Doctor treats `essential` and `recommended` failures as missing baseline items. `extra` failures are shown as optional so unselected tools do not look like setup failures.
+
 If your installer isn't one of the built-in tokens, add a new `install_<token>` function to `lib/installers.sh`.
 
 ## Adding a new macOS setting
@@ -138,8 +142,8 @@ If your installer isn't one of the built-in tokens, add a new `install_<token>` 
 # Installer function in lib/installers.sh
 install_macos_dark_mode() {
   local key=$1
-  defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
-  track_success "$(reg_field "$key" label)"
+  defaults write NSGlobalDomain AppleInterfaceStyle -string Dark || return 1
+  _finish_macos_setting "$key"
 }
 ```
 

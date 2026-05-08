@@ -2,7 +2,7 @@
 # Doctor — registry-driven environment diagnostics.
 #
 # Walks every key in the registry, evaluates its CHECK expression, and prints
-# a pass/fail badge. Grouped by type. No hardcoded tool list.
+# installed/missing/optional status grouped by type.
 
 run_doctor() {
   export _ZO_DOCTOR=0
@@ -36,16 +36,19 @@ _doctor_registry() {
   local t
   for t in "${types[@]}"; do
     _doctor_section "$(type_log_title "$t")"
-    local installed=0 missing=0
+    local installed=0 missing=0 optional=0
     local -a rows=()
-    local k label check
+    local k label tier
     while IFS= read -r k; do
       [ -z "$k" ] && continue
       label=$(reg_field "$k" label)
-      check=$(reg_field "$k" check)
-      if _doctor_eval "$check" "$k" "$(reg_field "$k" type)"; then
+      tier=$(reg_field "$k" tier)
+      if reg_check_passes "$k"; then
         rows+=("✓|$label")
         installed=$((installed + 1))
+      elif [ "$tier" = "extra" ]; then
+        rows+=("-|$label")
+        optional=$((optional + 1))
       else
         rows+=("✗|$label")
         missing=$((missing + 1))
@@ -58,52 +61,24 @@ _doctor_registry() {
       local lbl="${r#*|}"
       if [ "$mark" = "✓" ]; then
         printf "  \033[32m✓\033[0m  %s\n" "$lbl"
+      elif [ "$mark" = "-" ]; then
+        printf "  \033[33m-\033[0m  %s (optional)\n" "$lbl"
       else
         printf "  \033[31m✗\033[0m  %s\n" "$lbl"
       fi
     done
-    printf "     Installed: %d / Missing: %d\n" "$installed" "$missing"
+    printf "     Installed: %d / Missing: %d / Optional: %d\n" "$installed" "$missing" "$optional"
     echo ""
   done
-}
-
-# Evaluate a check expression. If empty, fall back to the command-name
-# default for tool-like types.
-_doctor_eval() {
-  local check=$1 key=$2 type=$3
-  if [ -n "$check" ]; then
-    eval "$check" &>/dev/null
-    return $?
-  fi
-  case "$type" in
-    cli|git|runtime|ai) command -v "$key" &>/dev/null ;;
-    *)              return 1 ;;
-  esac
 }
 
 # ── Config files ──
 
 _doctor_configs() {
   _doctor_section "Configuration Files"
-  local pair label path check pattern
-  local pairs=(
-    ".zshrc|$HOME/.zshrc||# >>> user-managed >>>"
-    ".zprofile|$HOME/.zprofile||# >>> mac-dev-setup: homebrew >>>"
-    "Ghostty|$HOME/.config/ghostty/config|[ -d /Applications/Ghostty.app ]|Catppuccin Mocha"
-    "Starship|$HOME/.config/starship.toml|command -v starship|catppuccin_mocha"
-    "bat|$HOME/.config/bat/config|command -v bat|Catppuccin Mocha"
-    "lazygit|$HOME/.config/lazygit/config.yml|command -v lazygit|#313244"
-    ".gitconfig|$HOME/.gitconfig||"
-    "Neovim|$HOME/.config/nvim/init.lua|command -v nvim|LazyVim"
-    ".hushlogin|$HOME/.hushlogin||"
-  )
-  for pair in "${pairs[@]}"; do
-    label="${pair%%|*}"
-    local rest="${pair#*|}"
-    path="${rest%%|*}"
-    rest="${rest#*|}"
-    check="${rest%%|*}"
-    pattern="${rest#*|}"
+  local label path check pattern
+  while IFS='|' read -r label path check pattern; do
+    [ -z "$label" ] && continue
     if [ -n "$check" ] && ! eval "$check" &>/dev/null; then
       printf "  \033[33m-\033[0m  %-35s %s\n" "$label" "not applicable"
       continue
@@ -117,7 +92,7 @@ _doctor_configs() {
       sz=$(wc -c < "$path" | tr -d ' ')
       printf "  \033[32m✓\033[0m  %-35s %s bytes\n" "$label" "$sz"
     fi
-  done
+  done < <(managed_config_checks)
   echo ""
 }
 
@@ -126,22 +101,9 @@ _doctor_configs() {
 _doctor_theme_consistency() {
   _doctor_section "Theme Consistency (Catppuccin Mocha)"
   local ok=0 total=0
-  local entry name file pattern check
-  local entries=(
-    "Ghostty|$HOME/.config/ghostty/config|Catppuccin Mocha|[ -d /Applications/Ghostty.app ]"
-    "Starship|$HOME/.config/starship.toml|catppuccin_mocha|command -v starship"
-    "bat|$HOME/.config/bat/config|Catppuccin Mocha|command -v bat"
-    "delta|$HOME/.gitconfig|Catppuccin Mocha|command -v delta"
-    "lazygit|$HOME/.config/lazygit/config.yml|#313244|command -v lazygit"
-    "Neovim|$HOME/.config/nvim/lua/plugins/catppuccin.lua|catppuccin-mocha|command -v nvim"
-  )
-  for entry in "${entries[@]}"; do
-    name="${entry%%|*}"
-    local rest="${entry#*|}"
-    file="${rest%%|*}"
-    rest="${rest#*|}"
-    pattern="${rest%%|*}"
-    check="${rest#*|}"
+  local name file pattern check
+  while IFS='|' read -r name file pattern check; do
+    [ -z "$name" ] && continue
     if [ -n "$check" ] && ! eval "$check" &>/dev/null; then
       printf "  \033[33m-\033[0m  %s (not applicable)\n" "$name"
       continue
@@ -153,7 +115,7 @@ _doctor_theme_consistency() {
     else
       printf "  \033[31m✗\033[0m  %s (theme not applied)\n" "$name"
     fi
-  done
+  done < <(managed_theme_checks)
   echo ""
   printf "     Theme: %d/%d consistent\n" "$ok" "$total"
   echo ""

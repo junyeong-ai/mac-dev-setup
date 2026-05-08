@@ -11,7 +11,8 @@
 #   ARGS      whitespace-separated arguments passed to the installer
 #   TIER      essential | recommended | extra
 #   DEPS      whitespace-separated registry keys that must install first
-#   CHECK     shell expression evaluated by doctor (empty uses type default)
+#   CHECK     shell expression used by installer and doctor verification
+#             (empty uses type default)
 #
 # Design notes:
 #   - Records with embedded whitespace in labels are fine (labels are field 3).
@@ -25,6 +26,8 @@
 #   - '|' (pipe) — record separator. Never use in LABEL, ARGS, DEPS, or CHECK.
 #     If a CHECK expression needs a pipe, rewrite without it (e.g. replace
 #     `cmd | head -1` with `cmd >/dev/null` or compgen).
+#   - ',' in LABEL — gum receives default selections as a comma-separated
+#     value, so labels must stay comma-free.
 
 REGISTRY=(
   # Shell & terminal
@@ -186,6 +189,21 @@ reg_field() {
   return 1
 }
 
+reg_check_passes() {
+  local key=$1 check type
+  check=$(reg_field "$key" check)
+  if [ -n "$check" ]; then
+    eval "$check" &>/dev/null
+    return $?
+  fi
+
+  type=$(reg_field "$key" type)
+  case "$type" in
+    cli|git|runtime|ai) command -v "$key" &>/dev/null ;;
+    *)                  return 1 ;;
+  esac
+}
+
 # Default-tier keys (essential + recommended) in registry order. Used by
 # --ci mode; the interactive UI computes per-category defaults separately.
 reg_default_keys() {
@@ -292,6 +310,11 @@ validate_registry() {
         ;;
       *) seen_labels="${seen_labels}|$label|" ;;
     esac
+
+    if [[ "$label" == *,* ]]; then
+      echo "REGISTRY ERROR: label cannot contain ',' because gum selected defaults are comma-separated (key: $k)" >&2
+      errors=$((errors + 1))
+    fi
 
     case "$type" in
       shell|font|cli|git|runtime|ai|app|macos) ;;

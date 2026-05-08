@@ -151,16 +151,11 @@ install_key() {
 # Brew formula: install_brew <key> <pkg>
 install_brew() {
   local key=$1 pkg=$2
-  local label short check action
+  local label short action
   label=$(reg_field "$key" label)
   short="${label%% (*}"
-  check=$(reg_field "$key" check)
 
-  if [ -n "$check" ] && eval "$check" &>/dev/null; then
-    track_success "$short"
-    return 0
-  fi
-  if [ -z "$check" ] && brew list --formula "$pkg" &>/dev/null 2>&1; then
+  if reg_check_passes "$key"; then
     track_success "$short"
     return 0
   fi
@@ -174,8 +169,8 @@ install_brew() {
   track_active "$short..."
   if brew "$action" "$pkg" >> "$LOG_FILE" 2>&1; then
     _clear_active_line
-    track_success "$short"
-    return 0
+    _finish_registry_key "$key" "$short"
+    return $?
   fi
   _clear_active_line
   track_error "$short"
@@ -187,16 +182,11 @@ install_brew() {
 # whether repair uses install or reinstall.
 install_brew_cask() {
   local key=$1 cask=$2
-  local label short check action
+  local label short action
   label=$(reg_field "$key" label)
   short="${label%% (*}"
-  check=$(reg_field "$key" check)
 
-  if [ -n "$check" ] && eval "$check" &>/dev/null; then
-    track_success "$short"
-    return 0
-  fi
-  if [ -z "$check" ] && brew list --cask "$cask" &>/dev/null 2>&1; then
+  if reg_check_passes "$key"; then
     track_success "$short"
     return 0
   fi
@@ -210,8 +200,8 @@ install_brew_cask() {
   track_active "$short..."
   if brew "$action" --cask "$cask" >> "$LOG_FILE" 2>&1; then
     _clear_active_line
-    track_success "$short"
-    return 0
+    _finish_registry_key "$key" "$short"
+    return $?
   fi
   _clear_active_line
   track_error "$short"
@@ -222,10 +212,9 @@ install_brew_cask() {
 # Self-bootstraps mise if missing so selection order doesn't matter.
 install_mise() {
   local key=$1 spec=$2
-  local label short check
+  local label short
   label=$(reg_field "$key" label)
   short="${label%% (*}"
-  check=$(reg_field "$key" check)
 
   if ! command -v mise &>/dev/null; then
     track_active "mise (bootstrap)..."
@@ -241,7 +230,7 @@ install_mise() {
 
   activate_mise || true
 
-  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+  if reg_check_passes "$key"; then
     track_success "$short"
     return 0
   fi
@@ -252,8 +241,8 @@ install_mise() {
   if bash -c 'eval "$(mise activate --shims --quiet bash)" && mise use -g "$1"' _ "$spec" >> "$LOG_FILE" 2>&1; then
     activate_mise || true
     _clear_active_line
-    track_success "$short (via mise)"
-    return 0
+    _finish_registry_key "$key" "$short (via mise)"
+    return $?
   fi
   _clear_active_line
   track_error "$short (via mise)"
@@ -264,12 +253,11 @@ install_mise() {
 # Self-bootstraps Node via mise if npm is missing.
 install_npm() {
   local key=$1 pkg=$2
-  local label short check
+  local label short
   label=$(reg_field "$key" label)
   short="${label%% (*}"
-  check=$(reg_field "$key" check)
 
-  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+  if reg_check_passes "$key"; then
     track_success "$short"
     return 0
   fi
@@ -288,8 +276,8 @@ install_npm() {
   track_active "$short (npm -g)..."
   if npm install -g "$pkg" >> "$LOG_FILE" 2>&1; then
     _clear_active_line
-    track_success "$short"
-    return 0
+    _finish_registry_key "$key" "$short"
+    return $?
   fi
   _clear_active_line
   track_error "$short"
@@ -310,11 +298,11 @@ install_zinit() {
     return 0
   fi
   track_active "$short..."
-  mkdir -p "$HOME/.local/share/zinit"
+  mkdir -p "$HOME/.local/share/zinit" || { _clear_active_line; track_error "$short"; return 1; }
   if git clone https://github.com/zdharma-continuum/zinit "$target" >> "$LOG_FILE" 2>&1; then
     _clear_active_line
-    track_success "$short"
-    return 0
+    _finish_registry_key "$key" "$short"
+    return $?
   fi
   _clear_active_line
   track_error "$short"
@@ -327,22 +315,20 @@ _clear_active_line() {
 
 install_git_defaults() {
   local key=$1
-  _git_config_default init.defaultBranch main
-  _git_config_default pull.rebase true
-  _git_config_default fetch.prune true
-  _git_config_default rerere.enabled true
-  track_success "$(reg_field "$key" label)"
-  return 0
+  _git_config_default init.defaultBranch main || return 1
+  _git_config_default pull.rebase true || return 1
+  _git_config_default fetch.prune true || return 1
+  _git_config_default rerere.enabled true || return 1
+  _finish_registry_key "$key" "$(reg_field "$key" label)"
 }
 
 install_git_lfs() {
   local key=$1
-  local label short check action
+  local label short action
   label=$(reg_field "$key" label)
   short="${label%% (*}"
-  check=$(reg_field "$key" check)
 
-  if [ -n "$check" ] && eval "$check" &>/dev/null; then
+  if reg_check_passes "$key"; then
     track_success "$short"
     return 0
   fi
@@ -368,8 +354,8 @@ install_git_lfs() {
   track_active "$short setup..."
   if git lfs install --skip-repo >> "$LOG_FILE" 2>&1; then
     _clear_active_line
-    track_success "$short setup"
-    return 0
+    _finish_registry_key "$key" "$short setup"
+    return $?
   fi
   _clear_active_line
   track_error "$short setup"
@@ -383,65 +369,74 @@ _git_config_default() {
   fi
 }
 
+_finish_registry_key() {
+  local key=$1 label=$2
+  if reg_check_passes "$key"; then
+    track_success "$label"
+    return 0
+  fi
+  track_error "$label"
+  return 1
+}
+
 # ── macOS settings (one function per key) ──
 # Each reads its label from the registry so a label change in registry.sh
 # automatically propagates to success messages.
 
 install_macos_keyrepeat() {
   local key=$1
-  defaults write NSGlobalDomain KeyRepeat -int 2
-  defaults write NSGlobalDomain InitialKeyRepeat -int 15
-  track_success "$(reg_field "$key" label)"
-  return 0
+  defaults write NSGlobalDomain KeyRepeat -int 2 || return 1
+  defaults write NSGlobalDomain InitialKeyRepeat -int 15 || return 1
+  _finish_macos_setting "$key"
 }
 
 install_macos_finder_hidden() {
   local key=$1
-  defaults write com.apple.finder AppleShowAllFiles YES
+  defaults write com.apple.finder AppleShowAllFiles YES || return 1
   _macos_needs_finder_restart=true
-  track_success "$(reg_field "$key" label)"
-  return 0
+  _finish_macos_setting "$key"
 }
 
 install_macos_finder_pathbar() {
   local key=$1
-  defaults write com.apple.finder ShowPathbar -bool true
+  defaults write com.apple.finder ShowPathbar -bool true || return 1
   _macos_needs_finder_restart=true
-  track_success "$(reg_field "$key" label)"
-  return 0
+  _finish_macos_setting "$key"
 }
 
 install_macos_dock() {
   local key=$1
-  defaults write com.apple.dock autohide -bool true
-  defaults write com.apple.dock autohide-delay -float 0
-  defaults write com.apple.dock autohide-time-modifier -float 0.3
+  defaults write com.apple.dock autohide -bool true || return 1
+  defaults write com.apple.dock autohide-delay -float 0 || return 1
+  defaults write com.apple.dock autohide-time-modifier -float 0.3 || return 1
   _macos_needs_dock_restart=true
-  track_success "$(reg_field "$key" label)"
-  return 0
+  _finish_macos_setting "$key"
 }
 
 install_macos_mission_control() {
   local key=$1
-  defaults write com.apple.dock expose-animation-duration -float 0.1
+  defaults write com.apple.dock expose-animation-duration -float 0.1 || return 1
   _macos_needs_dock_restart=true
-  track_success "$(reg_field "$key" label)"
-  return 0
+  _finish_macos_setting "$key"
 }
 
 install_macos_screenshots() {
   local key=$1
-  mkdir -p "$HOME/Screenshots"
-  defaults write com.apple.screencapture location "$HOME/Screenshots"
-  track_success "$(reg_field "$key" label)"
-  return 0
+  mkdir -p "$HOME/Screenshots" || return 1
+  defaults write com.apple.screencapture location "$HOME/Screenshots" || return 1
+  _finish_macos_setting "$key"
 }
 
 install_macos_hushlogin() {
   local key=$1
-  touch "$HOME/.hushlogin"
-  track_success "$(reg_field "$key" label)"
-  return 0
+  touch "$HOME/.hushlogin" || return 1
+  _finish_macos_setting "$key"
+}
+
+_finish_macos_setting() {
+  local key=$1 label
+  label=$(reg_field "$key" label)
+  _finish_registry_key "$key" "$label"
 }
 
 # Restart Finder/Dock after macOS defaults changes. Orchestrator calls this

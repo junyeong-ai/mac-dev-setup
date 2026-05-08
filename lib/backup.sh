@@ -23,8 +23,8 @@ backup_configs() {
       local rel dir
       rel="${f#"$HOME"/}"
       dir="$BACKUP_DIR/$(dirname "$rel")"
-      mkdir -p "$dir"
-      cp "$f" "$BACKUP_DIR/$rel"
+      mkdir -p "$dir" || { track_error "Backup failed: $f"; return 1; }
+      cp "$f" "$BACKUP_DIR/$rel" || { track_error "Backup failed: $f"; return 1; }
       count=$((count + 1))
     fi
   done

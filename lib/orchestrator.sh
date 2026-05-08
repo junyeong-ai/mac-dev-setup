@@ -63,7 +63,7 @@ run_install() {
     fi
   fi
 
-  _execute_selection "$selected_keys"
+  _execute_selection "$selected_keys" || exit 1
   _show_footer "$selected_keys" "$count"
 }
 
@@ -261,7 +261,7 @@ _execute_selection() {
   track_bar
 
   track_section "Backup"
-  backup_configs
+  backup_configs || return 1
   track_bar
 
   local current_type="" ran_macos=false
@@ -274,7 +274,7 @@ _execute_selection() {
       track_section "$(type_log_title "$t")"
       current_type=$t
     fi
-    install_key "$k"
+    install_key "$k" || return 1
     [ "$t" = "macos" ] && ran_macos=true
   done <<< "$selected_keys_text"
 
@@ -287,7 +287,7 @@ _execute_selection() {
   fi
 
   track_section "Configuration Files"
-  deploy_configs "$selected_keys_text"
+  deploy_configs "$selected_keys_text" || return 1
   track_bar
 }
 

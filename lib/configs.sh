@@ -24,16 +24,57 @@ ZPROFILE_BLOCK_END="# <<< mac-dev-setup: homebrew <<<"
 deploy_configs() {
   local keys=$1
 
-  _deploy_zprofile
-  _deploy_zshrc
+  _deploy_zprofile || return 1
+  _deploy_zshrc || return 1
 
-  _has_key "$keys" ghostty  && [ -d /Applications/Ghostty.app ] && _deploy_simple configs/ghostty.config   "$HOME/.config/ghostty/config"         "Ghostty config"
-  _has_key "$keys" starship && command -v starship &>/dev/null && _deploy_simple configs/starship.toml    "$HOME/.config/starship.toml"          "Starship config"
-  _has_key "$keys" bat      && command -v bat &>/dev/null      && _deploy_simple configs/bat.config      "$HOME/.config/bat/config"             "bat config"
-  _has_key "$keys" lazygit  && command -v lazygit &>/dev/null  && _deploy_simple configs/lazygit.yml     "$HOME/.config/lazygit/config.yml"     "lazygit config"
+  local key src dst label check
+  while IFS='|' read -r key src dst label check; do
+    [ -z "$key" ] && continue
+    if _has_key "$keys" "$key" && eval "$check" &>/dev/null; then
+      _deploy_simple "$src" "$dst" "$label" || return 1
+    fi
+  done < <(managed_simple_config_deployments)
 
-  _has_key "$keys" git_delta && _configure_delta
-  _has_key "$keys" neovim && _configure_neovim
+  if _has_key "$keys" git_delta; then
+    _configure_delta || return 1
+  fi
+  if _has_key "$keys" neovim; then
+    _configure_neovim || return 1
+  fi
+}
+
+managed_simple_config_deployments() {
+  cat << EOF
+ghostty|configs/ghostty.config|$HOME/.config/ghostty/config|Ghostty config|[ -d /Applications/Ghostty.app ]
+starship|configs/starship.toml|$HOME/.config/starship.toml|Starship config|command -v starship
+bat|configs/bat.config|$HOME/.config/bat/config|bat config|command -v bat
+lazygit|configs/lazygit.yml|$HOME/.config/lazygit/config.yml|lazygit config|command -v lazygit
+EOF
+}
+
+managed_config_checks() {
+  cat << EOF
+.zshrc|$HOME/.zshrc||# >>> user-managed >>>
+.zprofile|$HOME/.zprofile||# >>> mac-dev-setup: homebrew >>>
+Ghostty|$HOME/.config/ghostty/config|[ -d /Applications/Ghostty.app ]|Catppuccin Mocha
+Starship|$HOME/.config/starship.toml|command -v starship|catppuccin_mocha
+bat|$HOME/.config/bat/config|command -v bat|Catppuccin Mocha
+lazygit|$HOME/.config/lazygit/config.yml|command -v lazygit|#313244
+.gitconfig|$HOME/.gitconfig||
+Neovim|$HOME/.config/nvim/init.lua|command -v nvim|LazyVim
+.hushlogin|$HOME/.hushlogin||
+EOF
+}
+
+managed_theme_checks() {
+  cat << EOF
+Ghostty|$HOME/.config/ghostty/config|Catppuccin Mocha|[ -d /Applications/Ghostty.app ]
+Starship|$HOME/.config/starship.toml|catppuccin_mocha|command -v starship
+bat|$HOME/.config/bat/config|Catppuccin Mocha|command -v bat
+delta|$HOME/.gitconfig|Catppuccin Mocha|command -v delta
+lazygit|$HOME/.config/lazygit/config.yml|#313244|command -v lazygit
+Neovim|$HOME/.config/nvim/lua/plugins/catppuccin.lua|catppuccin-mocha|command -v nvim
+EOF
 }
 
 # ── Internals ──
@@ -45,8 +86,8 @@ _has_key() {
 
 _deploy_simple() {
   local src=$1 dst=$2 label=$3
-  mkdir -p "$(dirname "$dst")"
-  cp "$SCRIPT_DIR/$src" "$dst"
+  mkdir -p "$(dirname "$dst")" || { track_error "$label"; return 1; }
+  cp "$SCRIPT_DIR/$src" "$dst" || { track_error "$label"; return 1; }
   track_success "$label"
 }
 
@@ -61,13 +102,64 @@ EOF
 )
 
   if [ ! -f "$dst" ]; then
-    printf "%s\n" "$block" > "$dst"
+    printf "%s\n" "$block" > "$dst" || { track_error ".zprofile"; return 1; }
   elif grep -qF "$ZPROFILE_BLOCK_BEGIN" "$dst"; then
-    _replace_managed_block "$dst" "$ZPROFILE_BLOCK_BEGIN" "$ZPROFILE_BLOCK_END" "$block"
-  elif ! grep -q "brew shellenv" "$dst" 2>/dev/null; then
-    printf "\n%s\n" "$block" >> "$dst"
+    _replace_managed_block "$dst" "$ZPROFILE_BLOCK_BEGIN" "$ZPROFILE_BLOCK_END" "$block" || { track_error ".zprofile"; return 1; }
+  else
+    _normalize_zprofile_homebrew_block "$dst" "$block" || { track_error ".zprofile"; return 1; }
   fi
   track_success ".zprofile"
+}
+
+_normalize_zprofile_homebrew_block() {
+  local file=$1 block=$2
+  local tmp block_file
+  tmp=$(mktemp) || return 1
+  block_file=$(mktemp) || { rm -f "$tmp"; return 1; }
+  printf "%s\n" "$block" > "$block_file" || { rm -f "$tmp" "$block_file"; return 1; }
+  awk -v block_file="$block_file" '
+    function flush_pending() {
+      if (has_pending) {
+        print pending
+        has_pending = 0
+      }
+    }
+
+    function print_block() {
+      while ((getline line < block_file) > 0) print line
+      close(block_file)
+    }
+
+    $0 == "# Homebrew" {
+      pending = $0
+      has_pending = 1
+      next
+    }
+
+    index($0, "/opt/homebrew/bin/brew shellenv") > 0 {
+      if (!inserted) {
+        print_block()
+        inserted = 1
+      }
+      has_pending = 0
+      next
+    }
+
+    {
+      flush_pending()
+      print
+    }
+
+    END {
+      flush_pending()
+      if (!inserted) {
+        if (NR > 0) print ""
+        print_block()
+      }
+    }
+  ' "$file" > "$tmp" || { rm -f "$tmp" "$block_file"; return 1; }
+  rm -f "$block_file"
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
 # Deploy the zshrc template while preserving any user-managed block.
@@ -80,10 +172,10 @@ _deploy_zshrc() {
     preserved=$(_extract_user_block "$dst")
   fi
 
-  cp "$src" "$dst"
+  cp "$src" "$dst" || { track_error ".zshrc"; return 1; }
 
   if [ -n "$preserved" ]; then
-    _inject_user_block "$dst" "$preserved"
+    _inject_user_block "$dst" "$preserved" || { track_error ".zshrc"; return 1; }
     track_success ".zshrc (user-managed block preserved)"
   else
     track_success ".zshrc"
@@ -111,9 +203,9 @@ _inject_user_block() {
 _replace_managed_block() {
   local file=$1 begin=$2 end=$3 body=$4
   local tmp body_file
-  tmp=$(mktemp)
-  body_file=$(mktemp)
-  printf "%s\n" "$body" > "$body_file"
+  tmp=$(mktemp) || return 1
+  body_file=$(mktemp) || { rm -f "$tmp"; return 1; }
+  printf "%s\n" "$body" > "$body_file" || { rm -f "$tmp" "$body_file"; return 1; }
 
   awk -v b="$begin" -v e="$end" -v body_file="$body_file" '
     $0 == b {
@@ -124,20 +216,19 @@ _replace_managed_block() {
     }
     $0 == e { inb = 0; next }
     !inb    { print }
-  ' "$file" > "$tmp"
+  ' "$file" > "$tmp" || { rm -f "$tmp" "$body_file"; return 1; }
   rm -f "$body_file"
-  mv "$tmp" "$file"
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
 _configure_delta() {
-  if command -v delta &>/dev/null; then
-    _config_default core.pager delta
-    _config_default interactive.diffFilter "delta --color-only"
-    _config_default delta.navigate true
-    _config_default delta.side-by-side true
-    _config_default delta.syntax-theme "Catppuccin Mocha"
-    track_success "Git + delta"
-  fi
+  command -v delta &>/dev/null || return 0
+  _config_default core.pager delta || { track_error "Git + delta"; return 1; }
+  _config_default interactive.diffFilter "delta --color-only" || { track_error "Git + delta"; return 1; }
+  _config_default delta.navigate true || { track_error "Git + delta"; return 1; }
+  _config_default delta.side-by-side true || { track_error "Git + delta"; return 1; }
+  _config_default delta.syntax-theme "Catppuccin Mocha" || { track_error "Git + delta"; return 1; }
+  track_success "Git + delta"
 }
 
 _config_default() {
@@ -165,20 +256,25 @@ _configure_neovim() {
       track_error "Neovim + LazyVim"
       return 1
     fi
-    rm -rf "$nvim_dir/.git"
+    rm -rf "$nvim_dir/.git" || { track_error "Neovim + LazyVim"; return 1; }
   elif ! _is_lazyvim_config "$nvim_dir"; then
     track_warn "Neovim config exists"
     return 0
   fi
 
-  mkdir -p "$nvim_dir/lua/plugins"
-  cat > "$plugin_file" << 'LUA'
-return {
-  { "catppuccin/nvim", name = "catppuccin", priority = 1000 },
-  { "LazyVim/LazyVim", opts = { colorscheme = "catppuccin-mocha" } },
-}
-LUA
+  mkdir -p "$nvim_dir/lua/plugins" || { track_error "Neovim + LazyVim"; return 1; }
+  _write_neovim_catppuccin_plugin "$plugin_file" || { track_error "Neovim + LazyVim"; return 1; }
   track_success "Neovim + LazyVim"
+}
+
+_write_neovim_catppuccin_plugin() {
+  local plugin_file=$1
+  {
+    printf "%s\n" "return {"
+    printf "%s\n" '  { "catppuccin/nvim", name = "catppuccin", priority = 1000 },'
+    printf "%s\n" '  { "LazyVim/LazyVim", opts = { colorscheme = "catppuccin-mocha" } },'
+    printf "%s\n" "}"
+  } > "$plugin_file"
 }
 
 _is_lazyvim_config() {
