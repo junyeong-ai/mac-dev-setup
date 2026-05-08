@@ -11,10 +11,7 @@ C_PEACH="#fab387"
 C_TEXT="#cdd6f4"
 C_SUBTEXT="#a6adc8"
 C_SURFACE="#313244"
-C_BASE="#1e1e2e"
-C_CRUST="#11111b"
 C_LAVENDER="#b4befe"
-C_PINK="#f5c2e7"
 C_TEAL="#94e2d5"
 
 # Gradient ASCII logo
@@ -44,11 +41,6 @@ track_bar() {
   gum style --foreground "$C_SURFACE" "  │"
 }
 
-track_intro() {
-  gum style --foreground "$C_MAUVE" --bold "  ◆  $1"
-  track_bar
-}
-
 track_step_header() {
   local step=$1 total=$2 title=$3
   gum style --foreground "$C_BLUE" --bold "  ◆  Step $step/$total — $title"
@@ -76,10 +68,6 @@ track_info() {
   gum style --foreground "$C_SUBTEXT" "  │  $1"
 }
 
-track_pending() {
-  gum style --foreground "$C_SURFACE" "  │  ○ $1"
-}
-
 track_active() {
   gum style --foreground "$C_MAUVE" "  │  ● $1"
 }
@@ -96,48 +84,10 @@ track_cancel() {
   echo ""
 }
 
-# Backward-compatible aliases
-ui_header() {
-  echo ""
-  gum style --foreground "$C_MAUVE" --bold "  ◆  $1"
-  track_bar
-}
-
 ui_step() {
   track_bar
   track_step_header "$1" "$2" "$3"
   track_bar
-}
-
-ui_success()  { track_success "$1"; }
-ui_warn()     { track_warn "$1"; }
-ui_error()    { track_error "$1"; }
-ui_info()     { track_info "$1"; }
-ui_divider()  { track_bar; }
-
-ui_choose() {
-  local header=$1; shift
-  gum choose --no-limit \
-    --header "  │  $header" \
-    --header.foreground "$C_SUBTEXT" \
-    --cursor.foreground "$C_MAUVE" \
-    --selected.foreground "$C_GREEN" \
-    --selected-prefix "  │  ✓ " \
-    --unselected-prefix "  │    " \
-    --cursor "  │  ✓ " \
-    --height 20 \
-    "$@"
-}
-
-ui_choose_one() {
-  local header=$1; shift
-  gum choose \
-    --header "  │  $header" \
-    --header.foreground "$C_SUBTEXT" \
-    --cursor.foreground "$C_MAUVE" \
-    --selected.foreground "$C_GREEN" \
-    --cursor " ● " \
-    "$@"
 }
 
 ui_confirm() {
@@ -146,26 +96,6 @@ ui_confirm() {
     --selected.background "$C_MAUVE" \
     --unselected.background "$C_SURFACE" \
     "$1"
-}
-
-ui_spin() {
-  local title=$1; shift
-  gum spin \
-    --spinner dot \
-    --spinner.foreground "$C_MAUVE" \
-    --title "  │  ● $title" \
-    --title.foreground "$C_TEXT" \
-    -- "$@"
-}
-
-ui_summary_box() {
-  gum style \
-    --border rounded \
-    --border-foreground "$C_BLUE" \
-    --padding "1 3" \
-    --margin "0 4" \
-    --foreground "$C_TEXT" \
-    "$@"
 }
 
 ui_error_action() {
