@@ -5,6 +5,10 @@ export _ZO_DOCTOR=0
 typeset -U PATH path
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$HOME/bin:$PATH"
 
+_mac_dev_has() {
+  (( ${+commands[$1]} ))
+}
+
 # Zinit plugin manager (lazy-loaded)
 ZINIT_HOME="$HOME/.local/share/zinit/zinit.git"
 if [ -f "$ZINIT_HOME/zinit.zsh" ]; then
@@ -26,70 +30,89 @@ if [ -f "$ZINIT_HOME/zinit.zsh" ]; then
 fi
 
 # Starship prompt
-eval "$(starship init zsh)"
+_mac_dev_has starship && eval "$(starship init zsh)"
 
 # Environment
-export EDITOR="nvim"
+if _mac_dev_has nvim; then
+  export EDITOR="nvim"
+else
+  export EDITOR="vi"
+fi
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
 # Modern CLI aliases
-alias ls="eza --icons --group-directories-first"
-alias ll="eza -la --icons --group-directories-first --git"
-alias lt="eza --tree --level=3 --icons"
-alias cat="bat --paging=never"
-alias find="fd"
-alias grep="rg"
-alias top="btop"
-alias df="duf"
-alias du="dust"
-alias vim="nvim"
-alias vi="nvim"
-alias lg="lazygit"
-alias ld="lazydocker"
+if _mac_dev_has eza; then
+  alias ls="eza --icons --group-directories-first"
+  alias ll="eza -la --icons --group-directories-first --git"
+  alias lt="eza --tree --level=3 --icons"
+fi
+_mac_dev_has bat && alias cat="bat --paging=never"
+_mac_dev_has fd && alias find="fd"
+_mac_dev_has rg && alias grep="rg"
+_mac_dev_has btop && alias top="btop"
+_mac_dev_has duf && alias df="duf"
+_mac_dev_has dust && alias du="dust"
+if _mac_dev_has nvim; then
+  alias vim="nvim"
+  alias vi="nvim"
+fi
+_mac_dev_has lazygit && alias lg="lazygit"
+_mac_dev_has lazydocker && alias ld="lazydocker"
 alias c="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 
 # fzf (fuzzy finder + Catppuccin Mocha theme)
-source <(fzf --zsh)
-export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
-export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
-export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
-export FZF_DEFAULT_OPTS=" \
-  --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8 \
-  --color=fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc \
-  --color=marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8 \
-  --color=selected-bg:#45475a \
-  --border --border-label='' --preview-window='border-rounded' \
-  --prompt='  ' --marker='>' --pointer='◆' \
-  --separator='─' --scrollbar='│' --info='right'"
+if _mac_dev_has fzf; then
+  source <(fzf --zsh)
+  if _mac_dev_has fd; then
+    export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+    export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+    export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
+  fi
+  export FZF_DEFAULT_OPTS=" \
+    --color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8 \
+    --color=fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc \
+    --color=marker:#b4befe,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8 \
+    --color=selected-bg:#45475a \
+    --border --border-label='' --preview-window='border-rounded' \
+    --prompt='  ' --marker='>' --pointer='◆' \
+    --separator='─' --scrollbar='│' --info='right'"
+fi
 
 # navi (cheatsheet widget — Ctrl+G)
-command -v navi &>/dev/null && eval "$(navi widget zsh)"
+_mac_dev_has navi && eval "$(navi widget zsh)"
 
 # mise (runtime version manager — replaces nvm/asdf)
-eval "$(mise activate zsh)"
+_mac_dev_has mise && eval "$(mise activate zsh)"
+
+# direnv (per-project environment)
+_mac_dev_has direnv && eval "$(direnv hook zsh)"
 
 # atuin (SQLite-backed shell history — Ctrl+R / Up)
-command -v atuin &>/dev/null && eval "$(atuin init zsh)"
+_mac_dev_has atuin && eval "$(atuin init zsh)"
 
 # Tool launcher (fzf-based)
 function tools() {
-  local cmds=(
-    "btop:시스템 모니터링"
-    "lazygit:Git UI"
-    "lazydocker:Docker UI"
-    "duf:디스크 사용량"
-    "dust:폴더 크기 분석"
-  )
+  _mac_dev_has fzf || return 1
+  local cmds=()
+  _mac_dev_has btop && cmds+=("btop:시스템 모니터링")
+  _mac_dev_has lazygit && cmds+=("lazygit:Git UI")
+  _mac_dev_has lazydocker && cmds+=("lazydocker:Docker UI")
+  _mac_dev_has duf && cmds+=("duf:디스크 사용량")
+  _mac_dev_has dust && cmds+=("dust:폴더 크기 분석")
+  _mac_dev_has procs && cmds+=("procs:프로세스 목록")
+  _mac_dev_has tokei && cmds+=("tokei:코드 통계")
+  (( ${#cmds[@]} > 0 )) || return 1
+
   local selected=$(printf '%s\n' "${cmds[@]}" | fzf --delimiter=: --with-nth=2 --height=40% --reverse --border --prompt="도구 선택: ")
   local cmd="${selected%%:*}"
-  [[ -n "$cmd" ]] && eval "$cmd"
+  [[ -n "$cmd" ]] && _mac_dev_has "$cmd" && eval "$cmd"
 }
 
 # zoxide (smart cd — must be last)
-eval "$(zoxide init --cmd cd zsh)"
+_mac_dev_has zoxide && eval "$(zoxide init --cmd cd zsh)"
 
 # ────────────────────────────────────────────────────────────
 # >>> user-managed >>>

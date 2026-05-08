@@ -13,26 +13,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 USER_BLOCK_BEGIN="# >>> user-managed >>>"
 USER_BLOCK_END="# <<< user-managed <<<"
+ZPROFILE_BLOCK_BEGIN="# >>> mac-dev-setup: homebrew >>>"
+ZPROFILE_BLOCK_END="# <<< mac-dev-setup: homebrew <<<"
 
 # ── Public entry ──
 
 # deploy_configs <selected_keys>
-# selected_keys is a newline-separated list; gating for optional configs
-# (Ghostty, Starship, bat, lazygit) inspects this list.
+# selected_keys is a newline-separated list; selected app/tool configs inspect
+# this list so interactive choices remain authoritative.
 deploy_configs() {
   local keys=$1
 
   _deploy_zprofile
-  touch "$HOME/.hushlogin"
   _deploy_zshrc
 
-  _has_key "$keys" ghostty  && _deploy_simple configs/ghostty.config   "$HOME/.config/ghostty/config"         "Ghostty config"
-  _has_key "$keys" starship && _deploy_simple configs/starship.toml    "$HOME/.config/starship.toml"          "Starship config"
-  command -v bat &>/dev/null      && _deploy_simple configs/bat.config      "$HOME/.config/bat/config"             "bat config"
-  command -v lazygit &>/dev/null  && _deploy_simple configs/lazygit.yml     "$HOME/.config/lazygit/config.yml"     "lazygit config"
+  _has_key "$keys" ghostty  && [ -d /Applications/Ghostty.app ] && _deploy_simple configs/ghostty.config   "$HOME/.config/ghostty/config"         "Ghostty config"
+  _has_key "$keys" starship && command -v starship &>/dev/null && _deploy_simple configs/starship.toml    "$HOME/.config/starship.toml"          "Starship config"
+  _has_key "$keys" bat      && command -v bat &>/dev/null      && _deploy_simple configs/bat.config      "$HOME/.config/bat/config"             "bat config"
+  _has_key "$keys" lazygit  && command -v lazygit &>/dev/null  && _deploy_simple configs/lazygit.yml     "$HOME/.config/lazygit/config.yml"     "lazygit config"
 
-  _configure_git
-  _configure_neovim
+  _has_key "$keys" git_delta && _configure_delta
+  _has_key "$keys" neovim && _configure_neovim
 }
 
 # ── Internals ──
@@ -50,11 +51,21 @@ _deploy_simple() {
 }
 
 _deploy_zprofile() {
-  if [ ! -f "$HOME/.zprofile" ] || ! grep -q "brew shellenv" "$HOME/.zprofile" 2>/dev/null; then
-    cat > "$HOME/.zprofile" << 'EOF'
-# Homebrew
+  local dst="$HOME/.zprofile"
+  local block
+  block=$(cat << 'EOF'
+# >>> mac-dev-setup: homebrew >>>
 eval "$(/opt/homebrew/bin/brew shellenv)"
+# <<< mac-dev-setup: homebrew <<<
 EOF
+)
+
+  if [ ! -f "$dst" ]; then
+    printf "%s\n" "$block" > "$dst"
+  elif grep -qF "$ZPROFILE_BLOCK_BEGIN" "$dst"; then
+    _replace_managed_block "$dst" "$ZPROFILE_BLOCK_BEGIN" "$ZPROFILE_BLOCK_END" "$block"
+  elif ! grep -q "brew shellenv" "$dst" 2>/dev/null; then
+    printf "\n%s\n" "$block" >> "$dst"
   fi
   track_success ".zprofile"
 }
@@ -92,30 +103,47 @@ _extract_user_block() {
 # Replace the body between markers in $file with the provided content.
 _inject_user_block() {
   local file=$1 body=$2
-  local tmp
+  local block
+  block=$(printf "%s\n%s\n%s" "$USER_BLOCK_BEGIN" "$body" "$USER_BLOCK_END")
+  _replace_managed_block "$file" "$USER_BLOCK_BEGIN" "$USER_BLOCK_END" "$block"
+}
+
+_replace_managed_block() {
+  local file=$1 begin=$2 end=$3 body=$4
+  local tmp body_file
   tmp=$(mktemp)
-  awk -v b="$USER_BLOCK_BEGIN" -v e="$USER_BLOCK_END" -v body="$body" '
-    $0 == b { print; print body; inb = 1; next }
-    $0 == e { inb = 0; print; next }
+  body_file=$(mktemp)
+  printf "%s\n" "$body" > "$body_file"
+
+  awk -v b="$begin" -v e="$end" -v body_file="$body_file" '
+    $0 == b {
+      while ((getline line < body_file) > 0) print line
+      close(body_file)
+      inb = 1
+      next
+    }
+    $0 == e { inb = 0; next }
     !inb    { print }
   ' "$file" > "$tmp"
+  rm -f "$body_file"
   mv "$tmp" "$file"
 }
 
-_configure_git() {
-  if ! git config --global core.pager &>/dev/null && command -v delta &>/dev/null; then
-    git config --global init.defaultBranch main
-    git config --global pull.rebase true
-    git config --global fetch.prune true
-    git config --global rerere.enabled true
-    git config --global core.pager delta
-    git config --global interactive.diffFilter "delta --color-only"
-    git config --global delta.navigate true
-    git config --global delta.side-by-side true
-    git config --global delta.syntax-theme "Catppuccin Mocha"
+_configure_delta() {
+  if command -v delta &>/dev/null; then
+    _config_default core.pager delta
+    _config_default interactive.diffFilter "delta --color-only"
+    _config_default delta.navigate true
+    _config_default delta.side-by-side true
+    _config_default delta.syntax-theme "Catppuccin Mocha"
     track_success "Git + delta"
-  else
-    track_success "Git config"
+  fi
+}
+
+_config_default() {
+  local key=$1 value=$2
+  if ! git config --global "$key" &>/dev/null; then
+    git config --global "$key" "$value"
   fi
 }
 
@@ -123,20 +151,37 @@ _configure_neovim() {
   if ! command -v nvim &>/dev/null; then
     return 0
   fi
-  if [ -f "$HOME/.config/nvim/lazy-lock.json" ]; then
+
+  local nvim_dir="$HOME/.config/nvim"
+  local plugin_file="$nvim_dir/lua/plugins/catppuccin.lua"
+
+  if [ -f "$plugin_file" ]; then
     track_success "Neovim config"
     return 0
   fi
-  if [ ! -d "$HOME/.config/nvim" ]; then
-    git clone https://github.com/LazyVim/starter "$HOME/.config/nvim" >> "$LOG_FILE" 2>&1
-    rm -rf "$HOME/.config/nvim/.git"
+
+  if [ ! -d "$nvim_dir" ]; then
+    if ! git clone https://github.com/LazyVim/starter "$nvim_dir" >> "$LOG_FILE" 2>&1; then
+      track_error "Neovim + LazyVim"
+      return 1
+    fi
+    rm -rf "$nvim_dir/.git"
+  elif ! _is_lazyvim_config "$nvim_dir"; then
+    track_warn "Neovim config exists"
+    return 0
   fi
-  mkdir -p "$HOME/.config/nvim/lua/plugins"
-  cat > "$HOME/.config/nvim/lua/plugins/catppuccin.lua" << 'LUA'
+
+  mkdir -p "$nvim_dir/lua/plugins"
+  cat > "$plugin_file" << 'LUA'
 return {
   { "catppuccin/nvim", name = "catppuccin", priority = 1000 },
   { "LazyVim/LazyVim", opts = { colorscheme = "catppuccin-mocha" } },
 }
 LUA
   track_success "Neovim + LazyVim"
+}
+
+_is_lazyvim_config() {
+  local nvim_dir=$1
+  [ -f "$nvim_dir/lua/config/lazy.lua" ] && grep -q "LazyVim/LazyVim" "$nvim_dir/lua/config/lazy.lua" 2>/dev/null
 }
