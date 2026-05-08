@@ -1,6 +1,6 @@
 # Mac Dev Setup
 
-Registry-driven macOS developer environment installer (bash, Homebrew, gum UI, Catppuccin Mocha).
+Registry-driven Apple Silicon macOS developer environment bootstrapper (bash, Homebrew, gum UI, Catppuccin Mocha).
 
 ## Commands
 
@@ -18,13 +18,14 @@ Everything is driven by a single `REGISTRY` array in `lib/registry.sh`. Each rec
 - **Selection UI** pre-checks items with `tier ∈ {essential, recommended}`.
 - **`--ci` mode** installs the same default set with no prompt.
 - **`install_key <key>`** resolves `INSTALLER` + `ARGS` from the registry and dispatches to `install_<INSTALLER>`.
+- **Dependency expansion** installs registry `DEPS` before the selected key.
 - **`doctor`** walks the registry and evaluates each record's `CHECK` expression.
-- **Schema is validated at startup** by `validate_registry` — broken dispatch links abort the script before any work runs.
+- **Schema is validated at startup** by `validate_registry` — malformed records, duplicate keys, invalid enums, dependency errors, and broken dispatch links abort before any work runs.
 
-Registry record shape (7 pipe-separated fields):
+Registry record shape (8 pipe-separated fields):
 
 ```
-KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | CHECK
+KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | DEPS | CHECK
 ```
 
 See `lib/CLAUDE.md` for installer contracts and `lib/registry.sh` for the canonical field spec.
@@ -34,7 +35,7 @@ See `lib/CLAUDE.md` for installer contracts and `lib/registry.sh` for the canoni
 **Add a new tool** — one record to `REGISTRY` in `lib/registry.sh`:
 
 ```
-"httpie|cli|httpie (HTTP client)|brew|httpie|extra|command -v http"
+"httpie|cli|httpie (HTTP client)|brew|httpie|extra||brew list --formula httpie && command -v http"
 ```
 
 Then startup validation catches any typo. Everything else (UI, CI, doctor) picks it up automatically.
@@ -47,7 +48,8 @@ Then startup validation catches any typo. Everything else (UI, CI, doctor) picks
 
 | Prefix | Purpose |
 |--------|---------|
-| `ensure_*` | Bootstrap primitive (brew, gum) — safe before gum is available |
+| `activate_*` | Environment activation without installation |
+| `ensure_*` | Bootstrap primitive (system, brew metadata, gum) — safe before gum is available |
 | `install_*` | Installer invoked by dispatch |
 | `reg_*` | Registry accessor |
 | `type_*` | Type-to-display helper |
@@ -62,7 +64,7 @@ Then startup validation catches any typo. Everything else (UI, CI, doctor) picks
 - **User-facing strings in Korean**: gum labels, registry `LABEL` field, selection prompts. Everything else (code, comments, log output, section headers, function names) is English.
 - **`.zshrc` user-managed block**: the template contains `# >>> user-managed >>>` / `# <<< user-managed <<<` markers. `lib/configs.sh` preserves everything between them across re-runs. Never put managed content inside these markers.
 - **Registry field separator**: `|` is forbidden inside any field. Pipes in CHECK expressions cause false positives (pipeline exit code is the last command's). Use `&>/dev/null` instead of `| head -1`.
-- **Catppuccin Mocha** is applied by `lib/configs.sh` when each config file is deployed. It is not a user-selectable option.
+- **Catppuccin Mocha** is applied by `lib/configs.sh` to each selected config file that is deployed. It is not a user-selectable option.
 - **Bash 3.2 target**: macOS ships bash 3.2. No associative arrays (`declare -A`), no namerefs (`declare -n`), no `mapfile`/`readarray`.
 
 ## Anti-patterns

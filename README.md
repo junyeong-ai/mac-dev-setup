@@ -1,6 +1,6 @@
 # Mac Dev Setup
 
-One-command macOS development environment setup — registry-driven, tier-based, Catppuccin Mocha themed.
+One-command Apple Silicon macOS development environment bootstrap — registry-driven, tier-based, Catppuccin Mocha themed.
 
 ```bash
 bash setup.sh
@@ -10,13 +10,14 @@ bash setup.sh
 
 - **Registry-driven** — every installable option lives in `lib/registry.sh` as a single declarative record. Adding a new tool is one line.
 - **Tier-based defaults** — each option has a tier (`essential` / `recommended` / `extra`). Essential + recommended are pre-checked in the UI and installed by `--ci`.
-- **7-step interactive selection** via [gum](https://github.com/charmbracelet/gum) with Clack-style trackline UI.
+- **Category-based interactive selection** via [gum](https://github.com/charmbracelet/gum) with Clack-style trackline UI.
 - **Unified Catppuccin Mocha theme** across terminal, prompt, editor, and CLI tools.
-- **Idempotent** — safe to re-run; skips already-installed items.
+- **Idempotent repair** — safe to re-run; skips healthy items and repairs selected Homebrew-managed installs when their registry check fails.
 - **User-managed .zshrc block** — customizations between `# >>> user-managed >>>` / `# <<< user-managed <<<` markers are preserved on re-deploy.
 - **Auto-backup** — existing dotfiles saved to `~/.dotfiles-backup/` before any changes.
-- **CI mode** — `bash setup.sh --ci` installs `essential + recommended` non-interactively.
-- **Doctor** — `bash setup.sh doctor` walks the registry and reports what's installed, with theme consistency and git checks.
+- **CI mode** — `bash setup.sh --ci` installs `essential + recommended` non-interactively and fails on install errors.
+- **Doctor** — `bash setup.sh doctor` walks the registry without changing package state and reports installed tools, config drift, theme consistency, and git checks.
+- **Bootstrap scope** — refreshes Homebrew package metadata once, then installs missing selected tools from current Homebrew, mise, and npm stable/LTS channels. Registry dependencies are added automatically so first-run setup order is deterministic.
 
 ## Architecture
 
@@ -38,30 +39,34 @@ configs/
 └── lazygit.yml
 ```
 
+Re-running the setup is idempotent and repairs managed package/configuration state while preserving user-managed shell customizations.
+
 ### Registry schema
 
-Each record is a pipe-separated 7-tuple:
+Each record is a pipe-separated 8-tuple:
 
 ```
-KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | CHECK
+KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | DEPS | CHECK
 ```
 
 | Field | Meaning |
 |-------|---------|
 | `KEY` | Stable snake_case identifier (`eza`, `claude_code`, `macos_dock`) |
-| `TYPE` | `shell` · `font` · `cli` · `runtime` · `ai` · `app` · `macos` |
+| `TYPE` | `shell` · `font` · `cli` · `git` · `runtime` · `ai` · `app` · `macos` |
 | `LABEL` | Display string (Korean allowed) |
 | `INSTALLER` | Dispatch token → `install_<INSTALLER>` function |
 | `ARGS` | Whitespace-separated arguments to the installer |
 | `TIER` | `essential` · `recommended` · `extra` |
+| `DEPS` | Whitespace-separated registry keys that must install first |
 | `CHECK` | Shell expression for doctor (empty = type default) |
 
 ### Installer dispatch
 
 ```
 install_key <key>
-  └─ looks up INSTALLER + ARGS in registry
-     └─ calls install_<INSTALLER> <key> <args...>
+  └─ runs after selected keys are expanded through DEPS
+     └─ looks up INSTALLER + ARGS in registry
+        └─ calls install_<INSTALLER> <key> <args...>
 ```
 
 Available installer tokens:
@@ -69,19 +74,21 @@ Available installer tokens:
 | Token | Function | Purpose |
 |-------|----------|---------|
 | `brew` | `install_brew` | Homebrew formula |
-| `brew_cask` | `install_brew_cask` | Homebrew cask (with app-dir check) |
+| `brew_cask` | `install_brew_cask` | Homebrew cask |
 | `mise` | `install_mise` | mise-managed runtime (self-bootstraps mise) |
 | `npm` | `install_npm` | Global npm package (self-bootstraps Node) |
 | `zinit` | `install_zinit` | Git-clone Zinit plugin manager |
+| `git_lfs` | `install_git_lfs` | Git LFS binary + global filter setup |
 | `macos_<key>` | `install_macos_<key>` | Dedicated macOS defaults writer |
 
-The Catppuccin Mocha theme is applied by `lib/configs.sh` when config files are deployed — it is not a registry option.
+The Catppuccin Mocha theme is applied by `lib/configs.sh` to selected config files as they are deployed — it is not a registry option.
 
 ### Naming conventions
 
 | Prefix | Use |
 |--------|-----|
-| `ensure_*` | Bootstrap primitive (brew, gum) — callable before gum is available |
+| `activate_*` | Environment activation without installation (`activate_homebrew`, `activate_mise`) |
+| `ensure_*` | Bootstrap primitive (system, brew metadata, gum) — callable before gum is available |
 | `install_*` | Installer primitive called by dispatch (`install_brew`, `install_macos_dock`, …) |
 | `reg_*` | Registry accessor (`reg_keys`, `reg_field`, …) |
 | `type_*` | Type-to-display helper (`type_ui_title`, `type_log_title`) |
@@ -110,13 +117,14 @@ bash setup.sh doctor
 To add a new tool, append one record to `REGISTRY` in `lib/registry.sh`:
 
 ```bash
-"my_tool|cli|my_tool (설명)|brew|my-tool|recommended|command -v my-tool"
+"my_tool|cli|my_tool (설명)|brew|my-tool|recommended||brew list --formula my-tool && command -v my-tool"
 ```
 
 That's it. The option now appears in:
 
 - The interactive selection UI (under its type, pre-checked if `essential`/`recommended`)
 - The `--ci` install set (if tier qualifies)
+- Dependency expansion (if another selected key lists it in `DEPS`)
 - The doctor output (using the `CHECK` expression)
 
 If your installer isn't one of the built-in tokens, add a new `install_<token>` function to `lib/installers.sh`.
@@ -125,7 +133,7 @@ If your installer isn't one of the built-in tokens, add a new `install_<token>` 
 
 ```bash
 # Registry record
-"macos_dark_mode|macos|다크 모드 고정|macos_dark_mode||recommended|[ \"\$(defaults read -g AppleInterfaceStyle 2>/dev/null)\" = Dark ]"
+"macos_dark_mode|macos|다크 모드 고정|macos_dark_mode||recommended||[ \"\$(defaults read -g AppleInterfaceStyle 2>/dev/null)\" = Dark ]"
 
 # Installer function in lib/installers.sh
 install_macos_dark_mode() {
@@ -150,7 +158,7 @@ On re-run, the installer extracts the content between these markers from the exi
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
+- Apple Silicon Mac
 - Homebrew (auto-installed if missing)
 - Bash 3.2+ (macOS default; no associative arrays used)
 - [gum](https://github.com/charmbracelet/gum) (auto-installed if missing)
