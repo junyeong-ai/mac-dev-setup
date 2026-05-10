@@ -43,6 +43,7 @@ REGISTRY=(
   "font_pretendard|font|Pretendard (한글 UI)|brew_cask|font-pretendard|recommended||if compgen -G \"$HOME/Library/Fonts/Pretendard*\" >/dev/null; then true; else compgen -G \"/opt/homebrew/share/fonts/Pretendard*\" >/dev/null; fi"
 
   # CLI — essential (Rust-based modern replacements)
+  "gum|cli|gum (UI 툴킷)|brew|gum|essential||brew list --formula gum && command -v gum"
   "eza|cli|eza (ls 대체)|brew|eza|essential||brew list --formula eza && command -v eza"
   "bat|cli|bat (cat 대체)|brew|bat|essential||brew list --formula bat && command -v bat"
   "fd|cli|fd (find 대체)|brew|fd|essential||brew list --formula fd && command -v fd"
@@ -65,7 +66,6 @@ REGISTRY=(
 
   # CLI — extra
   "lazydocker|cli|lazydocker (Docker TUI)|brew|lazydocker|extra||brew list --formula lazydocker && command -v lazydocker"
-  "navi|cli|navi (치트시트 위젯)|brew|navi|extra||brew list --formula navi && command -v navi"
   "glow|cli|glow (마크다운 뷰어)|brew|glow|extra||brew list --formula glow && command -v glow"
   "sd|cli|sd (sed 대체)|brew|sd|extra||brew list --formula sd && command -v sd"
   "tokei|cli|tokei (코드 통계)|brew|tokei|extra||brew list --formula tokei && command -v tokei"
@@ -93,7 +93,7 @@ REGISTRY=(
   "rust|runtime|Rust|mise|rust@latest|extra|mise|mise where rust && command -v rustc"
 
   # AI
-  "claude_code|ai|Claude Code (Anthropic CLI)|npm|@anthropic-ai/claude-code|recommended|node|command -v claude"
+  "claude_code|ai|Claude Code (Anthropic CLI)|brew_cask|claude-code|recommended||command -v claude"
 
   # Apps
   "app_raycast|app|Raycast (Spotlight 대체)|brew_cask|raycast|recommended||[ -d /Applications/Raycast.app ]"

@@ -81,9 +81,6 @@ if _mac_dev_has fzf; then
     --separator='─' --scrollbar='│' --info='right'"
 fi
 
-# navi (cheatsheet widget — Ctrl+G)
-_mac_dev_has navi && eval "$(navi widget zsh)"
-
 # mise (runtime version manager — replaces nvm/asdf)
 _mac_dev_has mise && eval "$(mise activate zsh)"
 
