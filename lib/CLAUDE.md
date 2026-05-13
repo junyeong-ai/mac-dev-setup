@@ -51,6 +51,10 @@ Every function whose name matches `install_<TOKEN>` — including `install_macos
 5. **Verify through the registry**: after mutating package/config state, call `_finish_registry_key "$key" "$label"` or a wrapper such as `_finish_macos_setting "$key"` so `reg_check_passes` is the success criterion.
 6. **Return discipline**: `return 0` on success, non-zero on failure. Do not call `exit`, do not call `_handle_failure` or any retry logic — `install_key` owns recovery.
 
+## Skip accounting
+
+`install_key` appends a key to the file-scope `_INSTALL_SKIPPED_KEYS` (newline-separated string, bash 3.2-safe) when the user picks **Skip** at the Retry / Skip / Abort prompt. The orchestrator resets this string at the start of every `_execute_selection` call and reads it in `_show_footer` to emit an honest summary — `Setup Finished — K installed, M skipped (of N)` plus a per-item list — instead of a blanket `Setup Complete!`. If `ui_error_action` ever returns an unexpected value (gum dies, terminal lost, …) `install_key` now aborts the run rather than silently treating it as Skip; this is what previously let partial installs end with a green-banner "complete".
+
 ## Dispatch mechanics
 
 `install_key <key>`:

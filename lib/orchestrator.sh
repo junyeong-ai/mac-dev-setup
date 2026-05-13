@@ -244,6 +244,10 @@ _summary_count_line() {
 # whenever the current key type changes. Assumes bootstrap has already run.
 _execute_selection() {
   local selected_keys_text=$1
+  # Reset skip accounting for this run so the footer reflects only items
+  # the user skipped during *this* invocation.
+  _INSTALL_SKIPPED_KEYS=""
+
   track_bar
   gum style --foreground "$C_MAUVE" --bold "  ◆  Installing..."
   track_bar
@@ -283,10 +287,31 @@ _execute_selection() {
 
 _show_footer() {
   local selected_keys_text=$1 count=$2
-  track_done "Setup Complete! ($count items)"
+
+  local skipped_count=0
+  if [ -n "$_INSTALL_SKIPPED_KEYS" ]; then
+    skipped_count=$(printf "%s" "$_INSTALL_SKIPPED_KEYS" | sed '/^$/d' | wc -l | tr -d ' ')
+  fi
+  local installed_count=$((count - skipped_count))
+
+  if [ "$skipped_count" -gt 0 ]; then
+    track_done "Setup Finished — $installed_count installed, $skipped_count skipped (of $count)"
+  else
+    track_done "Setup Complete! ($count items)"
+  fi
 
   track_info "Log: $LOG_FILE"
   track_info "Backup: $BACKUP_DIR"
+
+  if [ "$skipped_count" -gt 0 ]; then
+    track_warn "Skipped items (re-run setup.sh to retry):"
+    local k label
+    while IFS= read -r k; do
+      [ -z "$k" ] && continue
+      label=$(reg_field "$k" label 2>/dev/null || printf "%s" "$k")
+      track_info "  • $label"
+    done <<< "$_INSTALL_SKIPPED_KEYS"
+  fi
   echo ""
 
   local -a next_steps=(

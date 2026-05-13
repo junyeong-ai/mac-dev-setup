@@ -22,6 +22,12 @@
 #      structured CMD/EXIT pair in the log.
 
 # ── Dispatch ──
+#
+# Skip accounting: install_key appends each user-skipped key (newline-
+# separated) to _INSTALL_SKIPPED_KEYS so the orchestrator's footer can
+# report what actually got installed vs what the user passed over. The
+# orchestrator resets the variable at the start of every install run.
+_INSTALL_SKIPPED_KEYS=""
 
 # Install a single key. Looks up installer + args, invokes the primitive,
 # and on failure offers retry/skip/abort in an iterative loop so repeated
@@ -64,10 +70,26 @@ install_key() {
     local action
     action=$(ui_error_action "$short")
     case "$action" in
-      Retry) continue ;;
-      Skip)  track_warn "Skipped $short"; return 0 ;;
-      Abort) track_error "Aborted"; exit 1 ;;
-      *)     track_warn "Unknown action '$action' — skipping $short"; return 0 ;;
+      Retry)
+        continue
+        ;;
+      Skip)
+        track_warn "Skipped $short"
+        _INSTALL_SKIPPED_KEYS="${_INSTALL_SKIPPED_KEYS}${key}"$'\n'
+        return 0
+        ;;
+      Abort)
+        track_error "Aborted"
+        exit 1
+        ;;
+      *)
+        # Empty / unrecognised action means the prompt itself misbehaved
+        # (gum failure, terminal lost, …). Abort instead of silently
+        # advancing — the previous "skip on unknown" behaviour was how
+        # partial installs ended up reporting "Setup Complete!".
+        track_error "Prompt returned unexpected value '$action' — aborting"
+        exit 1
+        ;;
     esac
   done
 }
