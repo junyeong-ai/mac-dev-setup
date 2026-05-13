@@ -342,5 +342,5 @@ _multi_select() {
     --height 18
   )
   [ -n "$selected_csv" ] && args+=(--selected "$selected_csv")
-  gum choose "${args[@]}" "$@"
+  _gum_run choose "${args[@]}" "$@"
 }

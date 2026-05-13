@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # UI system (Clack-style trackline + Catppuccin Mocha palette)
+#
+# Interactive gum invocations must go through _gum_run so Ctrl+C aborts
+# the whole script instead of being treated as an empty selection.
 
 # Catppuccin Mocha colors
 C_MAUVE="#cba6f7"
@@ -90,8 +93,24 @@ ui_step() {
   track_bar
 }
 
+# Run an interactive gum command and propagate Ctrl+C up to the top-level
+# shell. Without this, gum's exit code 130 (SIGINT) is treated as a regular
+# non-zero return and the script silently advances to the next step. The
+# `kill -INT $$` is required because a bare `exit 130` only terminates the
+# command-substitution subshell that wraps choose / confirm output, leaving
+# the parent script alive.
+_gum_run() {
+  gum "$@"
+  local rc=$?
+  if [ "$rc" -eq 130 ]; then
+    kill -INT $$
+    exit 130
+  fi
+  return $rc
+}
+
 ui_confirm() {
-  gum confirm \
+  _gum_run confirm \
     --prompt.foreground "$C_TEXT" \
     --selected.background "$C_MAUVE" \
     --unselected.background "$C_SURFACE" \
@@ -103,7 +122,7 @@ ui_error_action() {
   # Side effects (error banner) go to stderr so the caller's
   # `action=$(ui_error_action "$pkg")` captures only the user's choice.
   track_error "Failed: $pkg" 1>&2
-  gum choose --header "  │  What to do?" \
+  _gum_run choose --header "  │  What to do?" \
     --header.foreground "$C_YELLOW" \
     --cursor.foreground "$C_MAUVE" \
     --cursor " ● " \

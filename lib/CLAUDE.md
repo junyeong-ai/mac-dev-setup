@@ -32,6 +32,10 @@ All three return the wrapped command's exit code. Callers **must** wrap them in 
 
 `say_detail` emits an indented line with no leading marker — use it to elaborate after a `say_error`/`say_warn`/`say_step` without repeating the `✗`/`!`/`▶` prefix on every line. It goes to stderr (it most often follows a failure).
 
+## Signal handling in interactive gum prompts
+
+`gum choose` / `gum confirm` exit with code 130 when the user presses Ctrl+C. Inside a command substitution (`selected=$(gum choose …)`), a bare `exit 130` only terminates the subshell — the parent script then sees an empty selection and silently advances to the next step. All interactive gum calls go through `_gum_run` (defined in `ui.sh`), which relays SIGINT to the top-level shell with `kill -INT $$` so `setup.sh`'s INT trap fires and the whole script aborts cleanly. Only the interactive subcommands (`choose`, `confirm`) need the wrapper; `gum style` is rendering-only and runs to completion without prompting.
+
 ## Installer contract
 
 Every function whose name matches `install_<TOKEN>` — including `install_macos_*` — must:
