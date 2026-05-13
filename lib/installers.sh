@@ -261,6 +261,11 @@ install_npm() {
 # Each upstream `install.sh` owns its release artefact contract (tarball
 # layout, sha256 verification, codesign, platform detection). This installer
 # stays mechanical so adding a new tool is a one-line registry record.
+#
+# The registry CHECK is the single source of truth for success. Upstream
+# exit codes are advisory only — some upstream installers ship benign
+# trap-on-exit bugs that leak non-zero status after a successful install,
+# so we run every phase and let the final CHECK decide.
 install_github_script() {
   local key=$1
   shift
@@ -304,20 +309,12 @@ install_github_script() {
   local url="https://raw.githubusercontent.com/${repo}/main/scripts/install.sh"
 
   track_active "$short (binary)..."
-  if ! run_silent env "${env_vars[@]}" bash -c "curl -fsSL '$url' | bash"; then
-    _clear_active_line
-    track_error "$short (binary)"
-    return 1
-  fi
+  run_silent env "${env_vars[@]}" bash -c "curl -fsSL '$url' | bash" || true
   _clear_active_line
 
   if [ "${#post_install[@]}" -gt 0 ]; then
     track_active "$short (skill)..."
-    if ! run_silent env PATH="$HOME/.local/bin:$PATH" "${post_install[@]}"; then
-      _clear_active_line
-      track_error "$short (skill)"
-      return 1
-    fi
+    run_silent env PATH="$HOME/.local/bin:$PATH" "${post_install[@]}" || true
     _clear_active_line
   fi
 
