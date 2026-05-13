@@ -51,8 +51,18 @@ run_install() {
     fi
   fi
 
+  # _execute_selection only returns non-zero for *fatal* failures (backup or
+  # config deploy). Per-item install failures are isolated inside install_key
+  # and surfaced through _INSTALL_FAILED_KEYS so the rest of the selection
+  # keeps installing.
   _execute_selection "$selected_keys" || exit 1
   _show_footer "$selected_keys" "$count"
+
+  # Exit non-zero overall if any individual installs failed, so CI pipelines
+  # and shell `&&` chains can detect a partially-successful run.
+  if [ -n "$_INSTALL_FAILED_KEYS" ]; then
+    exit 1
+  fi
 }
 
 # ── Selection UI ──
@@ -242,10 +252,13 @@ _summary_count_line() {
 
 # Install all selected keys in dependency-first order with a section header
 # whenever the current key type changes. Assumes bootstrap has already run.
+# install_key isolates per-item failures (records them and returns 0) so the
+# loop runs to completion no matter how many individual installs fail; the
+# footer reports the outcome and run_install picks the overall exit code.
 _execute_selection() {
   local selected_keys_text=$1
-  # Reset skip accounting for this run so the footer reflects only items
-  # the user skipped during *this* invocation.
+  # Reset per-run accounting so the footer reflects only this invocation.
+  _INSTALL_FAILED_KEYS=""
   _INSTALL_SKIPPED_KEYS=""
 
   track_bar
@@ -266,7 +279,7 @@ _execute_selection() {
       track_section "$(type_log_title "$t")"
       current_type=$t
     fi
-    install_key "$k" || return 1
+    install_key "$k"
     [ "$t" = "macos" ] && ran_macos=true
   done <<< "$selected_keys_text"
 
@@ -288,14 +301,17 @@ _execute_selection() {
 _show_footer() {
   local selected_keys_text=$1 count=$2
 
-  local skipped_count=0
+  local failed_count=0 skipped_count=0
+  if [ -n "$_INSTALL_FAILED_KEYS" ]; then
+    failed_count=$(printf "%s" "$_INSTALL_FAILED_KEYS" | sed '/^$/d' | wc -l | tr -d ' ')
+  fi
   if [ -n "$_INSTALL_SKIPPED_KEYS" ]; then
     skipped_count=$(printf "%s" "$_INSTALL_SKIPPED_KEYS" | sed '/^$/d' | wc -l | tr -d ' ')
   fi
-  local installed_count=$((count - skipped_count))
+  local installed_count=$((count - failed_count - skipped_count))
 
-  if [ "$skipped_count" -gt 0 ]; then
-    track_done "Setup Finished — $installed_count installed, $skipped_count skipped (of $count)"
+  if [ "$failed_count" -gt 0 ] || [ "$skipped_count" -gt 0 ]; then
+    track_done "Setup Finished — $installed_count installed, $failed_count failed, $skipped_count skipped (of $count)"
   else
     track_done "Setup Complete! ($count items)"
   fi
@@ -303,6 +319,15 @@ _show_footer() {
   track_info "Log: $LOG_FILE"
   track_info "Backup: $BACKUP_DIR"
 
+  if [ "$failed_count" -gt 0 ]; then
+    track_error "Failed items (inspect $LOG_FILE then re-run setup.sh):"
+    local k label
+    while IFS= read -r k; do
+      [ -z "$k" ] && continue
+      label=$(reg_field "$k" label 2>/dev/null || printf "%s" "$k")
+      track_info "  • $label"
+    done <<< "$_INSTALL_FAILED_KEYS"
+  fi
   if [ "$skipped_count" -gt 0 ]; then
     track_warn "Skipped items (re-run setup.sh to retry):"
     local k label

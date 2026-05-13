@@ -23,15 +23,20 @@
 
 # ── Dispatch ──
 #
-# Skip accounting: install_key appends each user-skipped key (newline-
-# separated) to _INSTALL_SKIPPED_KEYS so the orchestrator's footer can
-# report what actually got installed vs what the user passed over. The
-# orchestrator resets the variable at the start of every install run.
+# Outcome accounting: install_key isolates failures per key so one bad
+# install never cascades into the rest. Failed and user-skipped keys are
+# appended to _INSTALL_FAILED_KEYS / _INSTALL_SKIPPED_KEYS (newline-
+# separated, bash 3.2-safe). The orchestrator resets both at the start of
+# every run and reads them in the footer so the user can see exactly what
+# fell out — and re-run setup.sh to retry only the misses.
+_INSTALL_FAILED_KEYS=""
 _INSTALL_SKIPPED_KEYS=""
 
 # Install a single key. Looks up installer + args, invokes the primitive,
-# and on failure offers retry/skip/abort in an iterative loop so repeated
-# retries don't grow the call stack.
+# and on failure either prompts (interactive) or records-and-continues
+# (CI / non-TTY). The only paths that exit the script are user-chosen
+# Abort and an unexpected prompt value — everything else returns 0 so the
+# orchestrator keeps installing the rest of the selection.
 install_key() {
   local key=$1
   local installer args
@@ -61,10 +66,14 @@ install_key() {
       return 0
     fi
 
-    # Non-interactive: fail clearly instead of hiding partial setup.
+    # Non-interactive: record the failure and continue with the next item.
+    # A failed font download or one unreachable cask should not strand the
+    # remaining tools — the user will see the failed list in the footer
+    # and re-run setup.sh to retry just the misses.
     if [ ! -t 0 ] || [ "${CI_MODE:-}" = "true" ]; then
-      track_error "Failed $short (non-interactive)"
-      return 1
+      track_error "Failed $short — continuing with remaining items"
+      _INSTALL_FAILED_KEYS="${_INSTALL_FAILED_KEYS}${key}"$'\n'
+      return 0
     fi
 
     local action
@@ -84,7 +93,7 @@ install_key() {
         ;;
       *)
         # Empty / unrecognised action means the prompt itself misbehaved
-        # (gum failure, terminal lost, …). Abort instead of silently
+        # (gum died, terminal lost, …). Abort instead of silently
         # advancing — the previous "skip on unknown" behaviour was how
         # partial installs ended up reporting "Setup Complete!".
         track_error "Prompt returned unexpected value '$action' — aborting"
