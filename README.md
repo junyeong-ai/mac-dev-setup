@@ -83,6 +83,7 @@ Available installer tokens:
 | `npm` | `install_npm` | Global npm package (self-bootstraps Node) |
 | `zinit` | `install_zinit` | Git-clone Zinit plugin manager |
 | `git_lfs` | `install_git_lfs` | Git LFS binary + global filter setup |
+| `github_script` | `install_github_script` | Runs an upstream `scripts/install.sh` from `raw.githubusercontent.com/<repo>/main`. ARGS: `[VAR=val ...] <owner/name> [-- <post-install argv...>]` |
 | `macos_<key>` | `install_macos_<key>` | Dedicated macOS defaults writer |
 
 The Catppuccin Mocha theme is applied by `lib/configs.sh` to selected config files as they are deployed — it is not a registry option.

@@ -94,6 +94,10 @@ REGISTRY=(
 
   # AI
   "claude_code|ai|Claude Code (Anthropic CLI)|brew_cask|claude-code|recommended||command -v claude"
+  "slack_cli|ai|slack-cli (Slack 워크스페이스 CLI + Claude 스킬)|github_script|junyeong-ai/slack-cli|extra|claude_code|[ -x \"$HOME/.local/bin/slack-cli\" ] && [ -f \"$HOME/.claude/skills/slack-workspace/SKILL.md\" ]"
+  "atlassian_cli|ai|atlassian-cli (Jira & Confluence CLI + Claude 스킬)|github_script|junyeong-ai/atlassian-cli|extra|claude_code|[ -x \"$HOME/.local/bin/atlassian-cli\" ] && [ -f \"$HOME/.claude/skills/jira-confluence/SKILL.md\" ]"
+  "webpilot|ai|webpilot (브라우저 자동화 CLI + Claude 스킬)|github_script|WEBPILOT_NO_SETUP=1 junyeong-ai/web-pilot -- webpilot setup skill --yes|extra|claude_code|[ -x \"$HOME/.local/bin/webpilot\" ] && [ -f \"$HOME/.claude/skills/webpilot/SKILL.md\" ]"
+  "symora|ai|symora (코드 심볼 네비게이션 CLI + Claude 스킬)|github_script|junyeong-ai/symora -- symora setup skill --yes|extra|claude_code|[ -x \"$HOME/.local/bin/symora\" ] && [ -f \"$HOME/.claude/skills/symora/SKILL.md\" ]"
 
   # Apps
   "app_raycast|app|Raycast (Spotlight 대체)|brew_cask|raycast|recommended||[ -d /Applications/Raycast.app ]"
@@ -351,6 +355,11 @@ validate_registry() {
           errors=$((errors + 1))
         fi
         ;;
+      github_script)
+        if ! _validate_github_script_args "$k" "$args"; then
+          errors=$((errors + 1))
+        fi
+        ;;
       zinit|git_defaults|git_lfs|macos_*)
         if [ "$arg_count" -ne 0 ]; then
           echo "REGISTRY ERROR: installer '$installer' does not accept args (key: $k)" >&2
@@ -394,6 +403,48 @@ validate_registry() {
 _registry_word_count() {
   local text=$1
   printf "%s\n" "$text" | wc -w | tr -d ' '
+}
+
+# Validate ARGS shape for `github_script`: [VAR=val ...] <repo> [-- <argv...>]
+_validate_github_script_args() {
+  local k=$1 args=$2
+  local IFS=$' \t\n'
+  local -a tokens
+  # shellcheck disable=SC2206
+  tokens=($args)
+
+  local i=0 n=${#tokens[@]}
+  while [ "$i" -lt "$n" ]; do
+    case "${tokens[$i]}" in
+      [A-Z]*=*) i=$((i + 1)) ;;
+      *)        break ;;
+    esac
+  done
+
+  if [ "$i" -ge "$n" ]; then
+    echo "REGISTRY ERROR: installer 'github_script' requires a <repo> argument (key: $k)" >&2
+    return 1
+  fi
+
+  local repo=${tokens[$i]}
+  if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    echo "REGISTRY ERROR: installer 'github_script' repo must be <owner>/<name>, got '$repo' (key: $k)" >&2
+    return 1
+  fi
+
+  local after=$((i + 1))
+  if [ "$after" -lt "$n" ]; then
+    if [ "${tokens[$after]}" != "--" ]; then
+      echo "REGISTRY ERROR: installer 'github_script' expects '--' before post-install argv (key: $k)" >&2
+      return 1
+    fi
+    if [ "$((after + 1))" -ge "$n" ]; then
+      echo "REGISTRY ERROR: installer 'github_script' '--' present but post-install argv is empty (key: $k)" >&2
+      return 1
+    fi
+  fi
+
+  return 0
 }
 
 _validate_dependency_graph() {

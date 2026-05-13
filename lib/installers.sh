@@ -243,6 +243,87 @@ install_npm() {
   return 1
 }
 
+# GitHub-hosted bootstrap script: install_github_script <key> [VAR=value...] <repo> [-- <post-install argv...>]
+#
+# Runs an upstream `scripts/install.sh` exposed at:
+#   https://raw.githubusercontent.com/<repo>/main/scripts/install.sh
+#
+# ARGS grammar (whitespace-tokenized within the registry record):
+#   1. Leading `VAR=value` tokens are exported into the environment of the
+#      upstream installer. They drive per-project knobs (e.g. an installer
+#      that auto-launches a post-install walkthrough when run from a TTY can
+#      be told to skip it via `<PROJECT>_NO_SETUP=1`).
+#   2. The next token is the GitHub repo (`<owner>/<name>`).
+#   3. Optional `--` separator introduces a post-install command (typically
+#      `<binary> setup skill --yes`) that runs with $HOME/.local/bin on PATH
+#      so the freshly installed binary is resolvable.
+#
+# Each upstream `install.sh` owns its release artefact contract (tarball
+# layout, sha256 verification, codesign, platform detection). This installer
+# stays mechanical so adding a new tool is a one-line registry record.
+install_github_script() {
+  local key=$1
+  shift
+
+  local -a env_vars=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      [A-Z]*=*) env_vars+=("$1"); shift ;;
+      *)        break ;;
+    esac
+  done
+
+  local repo=${1:-}
+  [ "$#" -gt 0 ] && shift
+
+  local -a post_install=()
+  if [ "$#" -gt 0 ] && [ "$1" = "--" ]; then
+    shift
+    post_install=("$@")
+  fi
+
+  local label short
+  label=$(reg_field "$key" label)
+  short="${label%% (*}"
+
+  if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    track_error "$short — invalid repo '$repo'"
+    return 1
+  fi
+
+  if reg_check_passes "$key"; then
+    track_success "$short"
+    return 0
+  fi
+
+  if ! command -v curl &>/dev/null; then
+    track_error "$short — curl is required"
+    return 1
+  fi
+
+  local url="https://raw.githubusercontent.com/${repo}/main/scripts/install.sh"
+
+  track_active "$short (binary)..."
+  if ! run_silent env "${env_vars[@]}" bash -c "curl -fsSL '$url' | bash"; then
+    _clear_active_line
+    track_error "$short (binary)"
+    return 1
+  fi
+  _clear_active_line
+
+  if [ "${#post_install[@]}" -gt 0 ]; then
+    track_active "$short (skill)..."
+    if ! run_silent env PATH="$HOME/.local/bin:$PATH" "${post_install[@]}"; then
+      _clear_active_line
+      track_error "$short (skill)"
+      return 1
+    fi
+    _clear_active_line
+  fi
+
+  _finish_registry_key "$key" "$short"
+}
+
 # Zinit: git-clone the plugin manager into its expected location.
 # install_zinit <key>  (no args used)
 install_zinit() {

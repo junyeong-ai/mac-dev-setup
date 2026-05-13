@@ -10,7 +10,7 @@ Loaded when Claude reads files in this directory. See `../CLAUDE.md` for project
 | `ui.sh` | `show_logo`, `track_*`, `ui_*`, Catppuccin Mocha color constants (`C_MAUVE`, `C_BLUE`, ...) |
 | `registry.sh` | `REGISTRY` array, `reg_keys`, `reg_keys_by_type`, `reg_keys_by_tier`, `reg_field`, `reg_check_passes`, `reg_default_keys`, `reg_types`, `type_ui_title`, `type_log_title`, `validate_registry` |
 | `bootstrap.sh` | `ensure_supported_system`, `activate_homebrew`, `activate_mise`, `bootstrap_homebrew`, `bootstrap_homebrew_metadata`, `bootstrap_gum`, `run_bootstrap` |
-| `installers.sh` | `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_git_defaults`, `install_git_lfs`, `install_macos_*` |
+| `installers.sh` | `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_github_script`, `install_git_defaults`, `install_git_lfs`, `install_macos_*` |
 | `orchestrator.sh` | `run_install` |
 | `doctor.sh` | `run_doctor` |
 | `configs.sh` | `deploy_configs` |
