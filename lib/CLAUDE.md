@@ -32,9 +32,13 @@ All three return the wrapped command's exit code. Callers **must** wrap them in 
 
 `say_detail` emits an indented line with no leading marker — use it to elaborate after a `say_error`/`say_warn`/`say_step` without repeating the `✗`/`!`/`▶` prefix on every line. It goes to stderr (it most often follows a failure).
 
-## Signal handling in interactive gum prompts
+## Signal handling for Ctrl+C
 
-`gum choose` / `gum confirm` exit with code 130 when the user presses Ctrl+C. Inside a command substitution (`selected=$(gum choose …)`), a bare `exit 130` only terminates the subshell — the parent script then sees an empty selection and silently advances to the next step. All interactive gum calls go through `_gum_run` (defined in `ui.sh`), which relays SIGINT to the top-level shell with `kill -INT $$` so `setup.sh`'s INT trap fires and the whole script aborts cleanly. Only the interactive subcommands (`choose`, `confirm`) need the wrapper; `gum style` is rendering-only and runs to completion without prompting.
+Any wrapped command exiting 130 (128 + SIGINT = "killed by Ctrl+C") goes through `_abort_if_interrupted` in `log.sh`. That helper calls `kill -INT 0` — broadcasting SIGINT to the **entire process group**, not just the top-level PID. The whole-pgroup signal is load-bearing: when bash waits on `selected_keys=$(_collect_selection)` and the inner `$(_multi_select …)` re-raises with `kill -INT $$`, bash defers signal handling on the outer shell until the intermediate subshell finishes, which means the script visibly walks through every remaining selection step before aborting. `kill -INT 0` kills the intermediate subshell too, so the abort is immediate.
+
+The script-level trap (`setup.sh`) calls `_handle_sigint`, which prints `"Interrupted."` only when `$$ = $BASHPID`. Without that guard, every subshell that receives the pgroup SIGINT would print its own banner.
+
+The runners (`run_interactive`, `run_with_tee`, `run_silent`) and `_gum_run` all funnel into the same `_abort_if_interrupted`, so Ctrl+C behaves identically whether the user pressed it during a gum prompt, a `brew install`, the Homebrew first-time install, or any other shell-out.
 
 ## Installer contract
 

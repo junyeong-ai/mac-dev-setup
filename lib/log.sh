@@ -140,12 +140,44 @@ say_debug() {
 # `set -e` around a single command while still capturing the exit code. The
 # runners use it (and a subshell for the tee variant) so they remain safe to
 # call in both bare and conditional contexts.
+#
+# Exit code 130 (128 + SIGINT) means the wrapped command was interrupted by
+# Ctrl+C. Bash does not re-raise SIGINT in the parent when a child exits
+# cleanly via its own SIGINT handler, so the script-level trap would silently
+# miss it. Every runner re-raises through _abort_if_interrupted so Ctrl+C
+# aborts uniformly no matter which phase the user interrupted.
+
+# Re-raise SIGINT to the entire process group when the previous command
+# exited 130. `kill -INT 0` is required because bash defers signal handling
+# on the top-level shell while it is waiting for an intermediate subshell
+# (e.g. selected_keys=$(_collect_selection)), and that intermediate subshell
+# does not see SIGINT unless we explicitly hit the whole pgroup. In a normal
+# `bash setup.sh` invocation the script has its own pgroup (job control of
+# the user's interactive shell), so this stays scoped to setup.sh's tree.
+_abort_if_interrupted() {
+  if [ "$1" -eq 130 ]; then
+    kill -INT 0
+    exit 130
+  fi
+}
+
+# Handle SIGINT for the script-level trap. Print the banner only from the
+# top-level shell so that `kill -INT 0` does not produce one message per
+# subshell.
+_handle_sigint() {
+  if [ "$$" = "$BASHPID" ]; then
+    printf "\n"
+    printf "Interrupted.\n" >&2
+  fi
+  exit 130
+}
 
 run_interactive() {
   _log_record CMD "(interactive) $*"
   local rc=0
   "$@" || rc=$?
   _log_record EXIT "(interactive) rc=$rc"
+  _abort_if_interrupted "$rc"
   return $rc
 }
 
@@ -161,6 +193,7 @@ run_with_tee() {
     exit "${PIPESTATUS[0]}"
   ) || rc=$?
   _log_record EXIT "(tee) rc=$rc"
+  _abort_if_interrupted "$rc"
   return $rc
 }
 
@@ -169,5 +202,6 @@ run_silent() {
   local rc=0
   "$@" </dev/null >> "$LOG_FILE" 2>&1 || rc=$?
   _log_record EXIT "(silent) rc=$rc"
+  _abort_if_interrupted "$rc"
   return $rc
 }

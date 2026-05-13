@@ -28,19 +28,19 @@ fi
 export _ZO_DOCTOR=0
 set -eo pipefail
 
-# Clean message on Ctrl+C instead of a bare abort trace. Exit 130 is the
-# standard "terminated by SIGINT" code. Note: this only fires when the
-# top-level bash receives SIGINT — long-running foreground children with
-# their own signal handlers (e.g. sudo during Homebrew install) may absorb
-# it and prevent this trap from running.
-trap 'echo ""; echo "Interrupted." >&2; exit 130' INT
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for lib in log ui registry bootstrap backup installers configs orchestrator doctor; do
   # shellcheck disable=SC1090
   source "$SCRIPT_DIR/lib/${lib}.sh"
 done
+
+# Trap is installed after sourcing so _handle_sigint (from log.sh) is
+# guaranteed to be defined when SIGINT arrives. _handle_sigint prints
+# "Interrupted." only from the top-level shell so kill -INT 0 — which
+# _abort_if_interrupted uses to propagate Ctrl+C out of command-substitution
+# subshells — does not produce one message per subshell.
+trap '_handle_sigint' INT
 
 # Validate registry dispatch links now that installers.sh is loaded.
 # Fails fast with a clear message on any registry typo.

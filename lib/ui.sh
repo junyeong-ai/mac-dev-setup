@@ -93,19 +93,13 @@ ui_step() {
   track_bar
 }
 
-# Run an interactive gum command and propagate Ctrl+C up to the top-level
-# shell. Without this, gum's exit code 130 (SIGINT) is treated as a regular
-# non-zero return and the script silently advances to the next step. The
-# `kill -INT $$` is required because a bare `exit 130` only terminates the
-# command-substitution subshell that wraps choose / confirm output, leaving
-# the parent script alive.
+# Run an interactive gum command and propagate Ctrl+C up to the script.
+# gum's exit code 130 (SIGINT) is otherwise treated as a regular non-zero
+# return and the script silently advances to the next step.
 _gum_run() {
   gum "$@"
   local rc=$?
-  if [ "$rc" -eq 130 ]; then
-    kill -INT $$
-    exit 130
-  fi
+  _abort_if_interrupted "$rc"
   return $rc
 }
 
