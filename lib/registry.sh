@@ -98,6 +98,7 @@ REGISTRY=(
   "atlassian_cli|ai|atlassian-cli (Jira & Confluence CLI + Claude 스킬)|github_script|junyeong-ai/atlassian-cli|extra|claude_code|[ -x \"$HOME/.local/bin/atlassian-cli\" ] && [ -f \"$HOME/.claude/skills/jira-confluence/SKILL.md\" ]"
   "webpilot|ai|webpilot (브라우저 자동화 CLI + Claude 스킬)|github_script|WEBPILOT_NO_SETUP=1 junyeong-ai/web-pilot -- webpilot setup skill --yes|extra|claude_code|[ -x \"$HOME/.local/bin/webpilot\" ] && [ -f \"$HOME/.claude/skills/webpilot/SKILL.md\" ]"
   "symora|ai|symora (코드 심볼 네비게이션 CLI + Claude 스킬)|github_script|junyeong-ai/symora -- symora setup skill --yes|extra|claude_code|[ -x \"$HOME/.local/bin/symora\" ] && [ -f \"$HOME/.claude/skills/symora/SKILL.md\" ]"
+  "nodex|ai|nodex (문서 그래프 CLI + Claude 스킬)|github_script|NODEX_YES=1 junyeong-ai/nodex|extra|claude_code|[ -x \"$HOME/.local/bin/nodex\" ] && [ -f \"$HOME/.claude/skills/nodex/SKILL.md\" ]"
 
   # Apps
   "app_raycast|app|Raycast (Spotlight 대체)|brew_cask|raycast|recommended||[ -d /Applications/Raycast.app ]"
