@@ -1,28 +1,16 @@
 #!/usr/bin/env bash
 # Orchestrator — install flow (selection UI + execution).
 #
-# Public entry points (mirror run_doctor in doctor.sh):
-#   run_bootstrap    — ensure system + brew + gum; must run before any gum-based UI
-#   run_install      — full install flow (interactive or --ci)
+# Public entry point:
+#   run_install      — full install flow (interactive or --ci). Assumes
+#                      run_bootstrap (in bootstrap.sh) has already prepared
+#                      Homebrew and gum so the UI primitives are available.
 #
 # Private helpers:
 #   _collect_selection    walk types and collect user-selected keys
 #   _execute_selection    run install_key in dependency-first order
 #   _show_summary         render the gum table preview
 #   _show_footer          final banner with install count
-
-# ── Bootstrap ──
-
-# Ensure bootstrap prerequisites before any gum-based UI is used. Pass
-# "install" to refresh Homebrew metadata before installing selected tools.
-run_bootstrap() {
-  ensure_supported_system
-  ensure_homebrew
-  if [ "${1:-}" = "install" ]; then
-    ensure_homebrew_metadata
-  fi
-  ensure_gum
-}
 
 # ── Install flow ──
 
@@ -31,7 +19,7 @@ run_install() {
     clear
   fi
   show_logo
-  _check_system
+  _show_system_banner
   track_bar
 
   local selected_keys
@@ -325,15 +313,13 @@ _show_footer() {
 
 # ── Private helpers ──
 
-_check_system() {
-  local arch macos_ver
-  arch=$(uname -m)
+# Display system info. ensure_supported_system has already validated the
+# platform in run_bootstrap, so this is pure presentation.
+_show_system_banner() {
+  local macos_ver cpu
   macos_ver=$(sw_vers -productVersion)
-  if [ "$arch" != "arm64" ]; then
-    track_error "Apple Silicon Mac required: $arch"
-    exit 1
-  fi
-  track_info "macOS $macos_ver  ·  $arch  ·  $(sysctl -n machdep.cpu.brand_string 2>/dev/null | sed 's/  */ /g')"
+  cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null | sed 's/  */ /g')
+  track_info "macOS $macos_ver  ·  $(uname -m)  ·  $cpu"
 }
 
 _join_csv() {

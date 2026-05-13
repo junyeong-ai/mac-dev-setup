@@ -22,11 +22,13 @@ bash setup.sh
 ## Architecture
 
 ```
-setup.sh                  # Entry point: arg parsing → orchestrator/doctor
+setup.sh                  # Entry point: arg parsing → bootstrap → orchestrator/doctor
 lib/
+├── log.sh                # say_* channels + run_interactive/run_with_tee/run_silent
+├── ui.sh                 # Catppuccin Mocha trackline UI primitives (gum)
 ├── registry.sh           # REGISTRY data + accessors (single source of truth)
+├── bootstrap.sh          # System check + Homebrew + gum bootstrap (uses log.sh)
 ├── installers.sh         # install_* primitives + dispatch via install_key
-├── ui.sh                 # Catppuccin Mocha trackline UI primitives
 ├── orchestrator.sh       # Selection UI + install execution loop
 ├── doctor.sh             # Registry-driven diagnostics
 ├── backup.sh             # Dotfile backup
@@ -90,16 +92,30 @@ The Catppuccin Mocha theme is applied by `lib/configs.sh` to selected config fil
 | Prefix | Use |
 |--------|-----|
 | `activate_*` | Environment activation without installation (`activate_homebrew`, `activate_mise`) |
-| `ensure_*` | Bootstrap primitive (system, brew metadata, gum) — callable before gum is available |
+| `bootstrap_*` | Bootstrap primitive (Homebrew, gum, metadata) — returns 0/non-zero, never exits |
 | `install_*` | Installer primitive called by dispatch (`install_brew`, `install_macos_dock`, …) |
 | `reg_*` | Registry accessor (`reg_keys`, `reg_field`, …) |
 | `type_*` | Type-to-display helper (`type_ui_title`, `type_log_title`) |
 | `ui_*` | UI primitive returning a value to the caller |
 | `track_*` | Trackline output (user-visible progress) |
-| `run_*` | Subcommand entry point (`run_bootstrap`, `run_install`, `run_doctor`) |
+| `say_*` | Plain-text output channel (bootstrap-safe; mirrors to log) |
+| `log_*` | Log-file lifecycle (`log_init`, `log_path`) |
+| `run_*` | Subcommand entry (`run_bootstrap`, `run_install`, `run_doctor`) and output-strategy primitives (`run_interactive`, `run_with_tee`, `run_silent`) |
 | `deploy_*`, `backup_*` | Config lifecycle (`deploy_configs`, `backup_configs`) |
 | `validate_*` | Schema validation (`validate_registry`) |
 | `_*` | File-private helper |
+
+### Output strategy primitives
+
+Every shell-out picks one of three runners (defined in `lib/log.sh`) based on what the user should see:
+
+| Runner | Redirection | Use for |
+|--------|-------------|---------|
+| `run_interactive <cmd>` | none (full TTY) | commands that own the terminal — sudo prompts, Homebrew first-time install |
+| `run_with_tee <cmd>` | stdout+stderr to user *and* log | long operations with meaningful progress (`brew update`, `brew install gum`) |
+| `run_silent <cmd>` | log-only | uninteresting output hidden behind a `track_*` UI step |
+
+All three return the wrapped command's exit code. Wrap them with `if !` / `||` so `set -e` does not abort before the error path runs.
 
 ## Usage
 

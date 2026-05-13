@@ -8,13 +8,15 @@
 #   ./setup.sh --help         Show this help
 #
 # Bash 3.2 compatible. Library load order satisfies dependencies:
-#   ui         — used by everyone for output
-#   registry   — data model (validated after installers.sh loads)
-#   backup     — dotfile backup
-#   installers — bootstrap + dispatch (depends on registry + ui)
-#   configs    — config file deployment (depends on ui)
-#   orchestrator — install flow (depends on all above)
-#   doctor     — diagnostics (depends on registry + ui)
+#   log          — output channels & command runners (zero deps)
+#   ui           — gum-based tracking UI (used after bootstrap installs gum)
+#   registry     — declarative data model (validated after installers.sh loads)
+#   bootstrap    — system check + Homebrew + gum (uses log)
+#   backup       — dotfile backup
+#   installers   — install_* primitives + dispatch
+#   configs      — config file deployment
+#   orchestrator — install flow (selection UI + execution)
+#   doctor       — diagnostics
 
 # ── Preconditions ──
 
@@ -27,13 +29,15 @@ export _ZO_DOCTOR=0
 set -eo pipefail
 
 # Clean message on Ctrl+C instead of a bare abort trace. Exit 130 is the
-# standard "terminated by SIGINT" code.
+# standard "terminated by SIGINT" code. Note: this only fires when the
+# top-level bash receives SIGINT — long-running foreground children with
+# their own signal handlers (e.g. sudo during Homebrew install) may absorb
+# it and prevent this trap from running.
 trap 'echo ""; echo "Interrupted." >&2; exit 130' INT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$HOME/.mac-dev-setup.log"
 
-for lib in ui registry backup installers configs orchestrator doctor; do
+for lib in log ui registry bootstrap backup installers configs orchestrator doctor; do
   # shellcheck disable=SC1090
   source "$SCRIPT_DIR/lib/${lib}.sh"
 done
@@ -56,37 +60,37 @@ Commands:
   -h, --help      Show this help
 
 Environment:
-  CI_MODE=true    Equivalent to --ci
+  CI_MODE=true              Equivalent to --ci
+  NO_COLOR=1                Disable ANSI colors in plain-text output
+  MAC_DEV_SETUP_DEBUG=1     Show debug messages
+  HOMEBREW_INSTALLER_URL    Override the Homebrew installer source (mirror, pinned SHA)
 
 See also: README.md
 HELP
 }
 
-init_log_file() {
-  : > "$LOG_FILE"
-}
-
 main() {
-  # Pre-subcommand handling (no bootstrap needed for --help)
   case "${1:-}" in
     -h|--help) print_help; exit 0 ;;
   esac
 
   case "${1:-}" in
     doctor|--doctor)
-      ensure_supported_system
+      # Doctor is read-only and deliberately does not call log_init so a
+      # previous install's log stays intact for post-mortem inspection.
+      ensure_supported_system || exit 1
       activate_homebrew || true
       activate_mise || true
       run_doctor
       ;;
     --ci)
       export CI_MODE=true
-      init_log_file
+      log_init
       run_bootstrap install
       run_install
       ;;
     ""|install)
-      init_log_file
+      log_init
       run_bootstrap install
       run_install
       ;;

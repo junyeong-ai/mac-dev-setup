@@ -252,7 +252,7 @@ _configure_neovim() {
   fi
 
   if [ ! -d "$nvim_dir" ]; then
-    if ! git clone https://github.com/LazyVim/starter "$nvim_dir" >> "$LOG_FILE" 2>&1; then
+    if ! run_silent git clone https://github.com/LazyVim/starter "$nvim_dir"; then
       track_error "Neovim + LazyVim"
       return 1
     fi

@@ -6,13 +6,31 @@ Loaded when Claude reads files in this directory. See `../CLAUDE.md` for project
 
 | File | Public API |
 |------|------------|
+| `log.sh` | `LOG_FILE`, `log_init`, `log_path`, `say_step`/`say_info`/`say_detail`/`say_warn`/`say_error`/`say_debug`, `run_interactive`, `run_with_tee`, `run_silent` |
+| `ui.sh` | `show_logo`, `track_*`, `ui_*`, Catppuccin Mocha color constants (`C_MAUVE`, `C_BLUE`, ...) |
 | `registry.sh` | `REGISTRY` array, `reg_keys`, `reg_keys_by_type`, `reg_keys_by_tier`, `reg_field`, `reg_check_passes`, `reg_default_keys`, `reg_types`, `type_ui_title`, `type_log_title`, `validate_registry` |
-| `installers.sh` | `ensure_supported_system`, `activate_homebrew`, `activate_mise`, `ensure_homebrew`, `ensure_homebrew_metadata`, `ensure_gum`, `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_git_lfs`, `install_macos_*` |
-| `orchestrator.sh` | `run_bootstrap`, `run_install` |
+| `bootstrap.sh` | `ensure_supported_system`, `activate_homebrew`, `activate_mise`, `bootstrap_homebrew`, `bootstrap_homebrew_metadata`, `bootstrap_gum`, `run_bootstrap` |
+| `installers.sh` | `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_git_defaults`, `install_git_lfs`, `install_macos_*` |
+| `orchestrator.sh` | `run_install` |
 | `doctor.sh` | `run_doctor` |
 | `configs.sh` | `deploy_configs` |
 | `backup.sh` | `backup_configs`, `BACKUP_DIR` |
-| `ui.sh` | `show_logo`, `track_*`, `ui_*`, Catppuccin Mocha color constants (`C_MAUVE`, `C_BLUE`, ...) |
+
+## Output strategy primitives (lib/log.sh)
+
+Every shell-out picks one of three runners based on the user contract:
+
+| Runner | Redirection | When to use |
+|--------|-------------|-------------|
+| `run_interactive <cmd>` | none (full TTY pass-through) | command owns the terminal — sudo prompts, "Press RETURN", first-time Homebrew install |
+| `run_with_tee <cmd>` | `2>&1 | tee -a "$LOG_FILE"` | long operation where progress matters and we also want a copy in the log (`brew update`, `brew install gum`) |
+| `run_silent <cmd>` | `>> "$LOG_FILE" 2>&1` | uninteresting output, hidden behind a `track_*` UI step |
+
+All three return the wrapped command's exit code. Callers **must** wrap them in `if !` / `||` so `set -e` does not abort the script before the error path runs. The three runners also emit `CMD` / `EXIT` records to the log so post-mortem diffs are unambiguous.
+
+`say_step` / `say_info` / `say_warn` / `say_error` / `say_debug` are the plain-text channels usable before gum is installed. They mirror their message to the log with the matching level prefix. `say_warn`/`say_error` go to stderr; the others to stdout.
+
+`say_detail` emits an indented line with no leading marker — use it to elaborate after a `say_error`/`say_warn`/`say_step` without repeating the `✗`/`!`/`▶` prefix on every line. It goes to stderr (it most often follows a failure).
 
 ## Installer contract
 
@@ -42,11 +60,20 @@ record's `DEPS` field and installs in dependency-first order. This keeps setup
 order explicit in the registry instead of baking dependency assumptions into
 category order.
 
-## Bootstrap caveat
+## Bootstrap layer
 
-`run_bootstrap install` runs `ensure_supported_system`, `ensure_homebrew`, `ensure_homebrew_metadata`, then `ensure_gum` before the install UI. These functions and anything they may reach must use **plain `echo`** — `track_*` and `gum style` require gum to be present. `doctor` calls `ensure_supported_system`, `activate_homebrew`, and `activate_mise` directly; it may load existing tool shims into PATH but must not install Homebrew, mise, or gum. `activate_mise` uses shims-only activation so doctor does not install shell hooks or emit mise hook noise.
+`run_bootstrap install` (defined in `bootstrap.sh`) runs:
 
-After `run_bootstrap`, the rest of the script is free to use the full UI vocabulary.
+1. `ensure_supported_system` — Apple Silicon + Darwin check.
+2. `bootstrap_homebrew` — pre-flight (admin group warning, installer reachability), download installer to a temp file, run it via `run_interactive` (or `run_with_tee` + `NONINTERACTIVE=1` under `CI_MODE`), then verify `/opt/homebrew/bin/brew` exists.
+3. `bootstrap_homebrew_metadata` — `brew update` via `run_with_tee` so the user can watch progress.
+4. `bootstrap_gum` — `brew install gum` via `run_with_tee`.
+
+Bootstrap primitives **must not** use `track_*` / `gum style` (gum isn't installed yet) and **must not** call `exit` — only `run_bootstrap` exits on failure. They emit progress via `say_*`. The Homebrew installer is invoked with `run_interactive` so its sudo prompt, "Press RETURN to continue", and Xcode CLT progress reach the user's terminal. Redirecting that command to a log file is a bug: it hides interactive prompts, triggers Homebrew's NONINTERACTIVE-mode fallbacks, and leaves the user staring at a dead-looking terminal.
+
+`doctor` calls `ensure_supported_system`, `activate_homebrew`, and `activate_mise` directly; it may load existing tool shims into PATH but must not install Homebrew, mise, or gum. `activate_mise` uses shims-only activation so doctor does not install shell hooks or emit mise hook noise.
+
+After `run_bootstrap`, the rest of the script is free to use the full UI vocabulary (`track_*`, `ui_*`, `gum style`).
 
 ## macOS finalization
 

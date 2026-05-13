@@ -1,104 +1,30 @@
 #!/usr/bin/env bash
-# Installers — registry dispatch, primitive installers, bootstrap.
+# Installers — registry dispatch + install primitives.
 #
 # Architecture:
 #   install_key <key>
 #     ├─ looks up INSTALLER + ARGS in registry
 #     ├─ calls install_<INSTALLER> "$key" <args...>
-#     └─ on non-zero exit, iterative retry/skip/abort prompt
-#                          (interactive only; fail in CI/non-TTY)
+#     └─ on non-zero return, iterative retry/skip/abort prompt
+#                            (interactive only; fail in CI/non-TTY)
 #
 # Naming convention:
-#   ensure_*        bootstrap primitive (public; used before gum is available)
 #   install_*       installer primitive (public; called by dispatch)
-#   install_macos_* dedicated per-key installer for macOS settings
+#   install_macos_* dedicated per-key installer for a macOS setting
 #   _*              file-private helper
 #
 # Contract for every install_* primitive:
 #   1. Be idempotent — short-circuit with track_success on already-installed.
 #   2. Emit track_success on success, track_error on failure.
-#   3. Return 0 on success, non-zero on failure. No retry logic inside
-#      primitives; dispatch handles recovery uniformly.
-
-LOG_FILE="${LOG_FILE:-$HOME/.mac-dev-setup.log}"
-
-# ── Bootstrap (runs before gum is available) ──
-
-ensure_supported_system() {
-  if [ "$(uname -s)" != "Darwin" ]; then
-    echo "Error: macOS required." >&2
-    exit 1
-  fi
-
-  if [ "$(uname -m)" != "arm64" ]; then
-    echo "Error: Apple Silicon Mac required." >&2
-    exit 1
-  fi
-}
-
-activate_homebrew() {
-  if [ -x /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-    return 0
-  fi
-  return 1
-}
-
-activate_mise() {
-  if command -v mise &>/dev/null; then
-    local activation
-    activation=$(mise activate --shims --quiet bash 2>/dev/null) || return 1
-    eval "$activation" || return 1
-    return 0
-  fi
-  return 1
-}
-
-# Ensure Homebrew exists. Uses plain echo because gum/tracking UI may not
-# be installed yet. Idempotent.
-ensure_homebrew() {
-  if activate_homebrew; then
-    return 0
-  fi
-
-  echo "Installing Homebrew (first-time setup)..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" >> "$LOG_FILE" 2>&1
-  if activate_homebrew; then
-    echo "Homebrew installed."
-  else
-    echo "Homebrew installation failed — check $LOG_FILE" >&2
-    exit 1
-  fi
-}
-
-ensure_homebrew_metadata() {
-  echo "Updating Homebrew package metadata..."
-  if brew update >> "$LOG_FILE" 2>&1; then
-    echo "Homebrew metadata updated."
-  else
-    echo "Homebrew update failed — check $LOG_FILE" >&2
-    exit 1
-  fi
-}
-
-# Ensure gum exists. Requires Homebrew. Uses plain echo until gum is ready.
-ensure_gum() {
-  if command -v gum &>/dev/null; then
-    return 0
-  fi
-  echo "Installing gum (UI toolkit)..."
-  if brew install gum >> "$LOG_FILE" 2>&1; then
-    echo "gum installed."
-  else
-    echo "gum installation failed — check $LOG_FILE" >&2
-    exit 1
-  fi
-}
+#   3. Return 0 on success, non-zero on failure. No retry logic here;
+#      install_key handles recovery uniformly.
+#   4. Capture command output via run_silent so each shell-out leaves a
+#      structured CMD/EXIT pair in the log.
 
 # ── Dispatch ──
 
 # Install a single key. Looks up installer + args, invokes the primitive,
-# and on failure offers retry/skip/abort in an *iterative* loop so repeated
+# and on failure offers retry/skip/abort in an iterative loop so repeated
 # retries don't grow the call stack.
 install_key() {
   local key=$1
@@ -160,14 +86,14 @@ install_brew() {
     return 0
   fi
 
-  if brew list --formula "$pkg" &>/dev/null 2>&1; then
+  if brew list --formula "$pkg" &>/dev/null; then
     action=reinstall
   else
     action=install
   fi
 
   track_active "$short..."
-  if brew "$action" "$pkg" >> "$LOG_FILE" 2>&1; then
+  if run_silent brew "$action" "$pkg"; then
     _clear_active_line
     _finish_registry_key "$key" "$short"
     return $?
@@ -191,14 +117,14 @@ install_brew_cask() {
     return 0
   fi
 
-  if brew list --cask "$cask" &>/dev/null 2>&1; then
+  if brew list --cask "$cask" &>/dev/null; then
     action=reinstall
   else
     action=install
   fi
 
   track_active "$short..."
-  if brew "$action" --cask "$cask" >> "$LOG_FILE" 2>&1; then
+  if run_silent brew "$action" --cask "$cask"; then
     _clear_active_line
     _finish_registry_key "$key" "$short"
     return $?
@@ -218,7 +144,7 @@ install_mise() {
 
   if ! command -v mise &>/dev/null; then
     track_active "mise (bootstrap)..."
-    if brew install mise >> "$LOG_FILE" 2>&1; then
+    if run_silent brew install mise; then
       _clear_active_line
       track_success "mise (bootstrap)"
     else
@@ -236,9 +162,11 @@ install_mise() {
   fi
 
   track_active "$short (via mise)..."
-  # Pass spec as positional arg to bash -c so it can't be re-interpreted as
-  # a shell command even if the registry is ever extended with untrusted data.
-  if bash -c 'eval "$(mise activate --shims --quiet bash)" && mise use -g "$1"' _ "$spec" >> "$LOG_FILE" 2>&1; then
+  # Single quotes are intentional: $(...) and $1 are evaluated by the spawned
+  # bash with mise activation just applied. Passing $spec as a positional arg
+  # (after the `_` $0 placeholder) keeps it out of the shell parser entirely.
+  # shellcheck disable=SC2016
+  if run_silent bash -c 'eval "$(mise activate --shims --quiet bash)" && mise use -g "$1"' _ "$spec"; then
     activate_mise || true
     _clear_active_line
     _finish_registry_key "$key" "$short (via mise)"
@@ -274,7 +202,7 @@ install_npm() {
   fi
 
   track_active "$short (npm -g)..."
-  if npm install -g "$pkg" >> "$LOG_FILE" 2>&1; then
+  if run_silent npm install -g "$pkg"; then
     _clear_active_line
     _finish_registry_key "$key" "$short"
     return $?
@@ -299,7 +227,7 @@ install_zinit() {
   fi
   track_active "$short..."
   mkdir -p "$HOME/.local/share/zinit" || { _clear_active_line; track_error "$short"; return 1; }
-  if git clone https://github.com/zdharma-continuum/zinit "$target" >> "$LOG_FILE" 2>&1; then
+  if run_silent git clone https://github.com/zdharma-continuum/zinit "$target"; then
     _clear_active_line
     _finish_registry_key "$key" "$short"
     return $?
@@ -307,10 +235,6 @@ install_zinit() {
   _clear_active_line
   track_error "$short"
   return 1
-}
-
-_clear_active_line() {
-  [ -t 1 ] && printf "\033[1A\033[2K"
 }
 
 install_git_defaults() {
@@ -334,14 +258,14 @@ install_git_lfs() {
   fi
 
   if ! brew list --formula git-lfs &>/dev/null || ! command -v git-lfs &>/dev/null; then
-    if brew list --formula git-lfs &>/dev/null 2>&1; then
+    if brew list --formula git-lfs &>/dev/null; then
       action=reinstall
     else
       action=install
     fi
 
     track_active "$short..."
-    if brew "$action" git-lfs >> "$LOG_FILE" 2>&1; then
+    if run_silent brew "$action" git-lfs; then
       _clear_active_line
       track_success "$short"
     else
@@ -352,30 +276,13 @@ install_git_lfs() {
   fi
 
   track_active "$short setup..."
-  if git lfs install --skip-repo >> "$LOG_FILE" 2>&1; then
+  if run_silent git lfs install --skip-repo; then
     _clear_active_line
     _finish_registry_key "$key" "$short setup"
     return $?
   fi
   _clear_active_line
   track_error "$short setup"
-  return 1
-}
-
-_git_config_default() {
-  local key=$1 value=$2
-  if ! git config --global "$key" &>/dev/null; then
-    git config --global "$key" "$value"
-  fi
-}
-
-_finish_registry_key() {
-  local key=$1 label=$2
-  if reg_check_passes "$key"; then
-    track_success "$label"
-    return 0
-  fi
-  track_error "$label"
   return 1
 }
 
@@ -431,6 +338,29 @@ install_macos_hushlogin() {
   local key=$1
   touch "$HOME/.hushlogin" || return 1
   _finish_macos_setting "$key"
+}
+
+# ── Private helpers ──
+
+_clear_active_line() {
+  [ -t 1 ] && printf "\033[1A\033[2K"
+}
+
+_git_config_default() {
+  local key=$1 value=$2
+  if ! git config --global "$key" &>/dev/null; then
+    git config --global "$key" "$value"
+  fi
+}
+
+_finish_registry_key() {
+  local key=$1 label=$2
+  if reg_check_passes "$key"; then
+    track_success "$label"
+    return 0
+  fi
+  track_error "$label"
+  return 1
 }
 
 _finish_macos_setting() {
