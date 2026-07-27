@@ -321,6 +321,66 @@ install_github_script() {
   _finish_registry_key "$key" "$short"
 }
 
+# Vendor-hosted install script: install_curl_script <key> <url> [-- <post-install argv...>]
+#
+# For tools whose official install path is the vendor's own curl-to-bash
+# installer rather than a Homebrew package. install_github_script covers repos
+# publishing scripts/install.sh under raw.githubusercontent.com; this covers an
+# arbitrary vendor URL such as https://claude.ai/install.sh.
+#
+# Chosen over a Homebrew cask for tools that self-update: a cask install pins
+# whatever channel the cask tracks and never updates itself, while these
+# installers manage their own version directory and update in the background.
+# The URL must be https — a plaintext install script is a remote-code-execution
+# vector, so this refuses rather than trusting the registry to get it right.
+#
+# As with install_github_script, the registry CHECK is the single source of
+# truth for success; upstream exit codes are advisory.
+install_curl_script() {
+  local key=$1
+  shift
+
+  local url=${1:-}
+  [ "$#" -gt 0 ] && shift
+
+  local -a post_install=()
+  if [ "$#" -gt 0 ] && [ "$1" = "--" ]; then
+    shift
+    post_install=("$@")
+  fi
+
+  local label short
+  label=$(reg_field "$key" label)
+  short="${label%% (*}"
+
+  case "$url" in
+    https://*) ;;
+    *) track_error "$short — install URL must be https, got '$url'"; return 1 ;;
+  esac
+
+  if reg_check_passes "$key"; then
+    track_success "$short"
+    return 0
+  fi
+
+  if ! command -v curl &>/dev/null; then
+    track_error "$short — curl is required"
+    return 1
+  fi
+
+  track_active "$short..."
+  run_silent bash -c "curl -fsSL '$url' | bash" || true
+  _clear_active_line
+
+  if [ "${#post_install[@]}" -gt 0 ]; then
+    track_active "$short (setup)..."
+    run_silent env PATH="$HOME/.local/bin:$PATH" "${post_install[@]}" || true
+    _clear_active_line
+  fi
+
+  _finish_registry_key "$key" "$short"
+}
+
 # Zinit: git-clone the plugin manager into its expected location.
 # install_zinit <key>  (no args used)
 install_zinit() {
@@ -344,6 +404,49 @@ install_zinit() {
   _clear_active_line
   track_error "$short"
   return 1
+}
+
+# Docker client: the CLI plus Homebrew's compose and buildx plugins.
+#
+# This is a dedicated installer rather than three plain `brew` records because
+# installing the formulae is not sufficient. Homebrew drops the compose and
+# buildx plugins into /opt/homebrew/lib/docker/cli-plugins, which the docker
+# CLI does not search: on a fresh machine `docker compose` fails with
+# "is not a docker command" even though the formula is installed. The
+# cliPluginsExtraDirs entry in ~/.docker/config.json is what connects them, so
+# the registry CHECK verifies `docker compose version` rather than just the
+# binaries.
+#
+# install_docker_cli <key>  (no args used)
+install_docker_cli() {
+  local key=$1
+  local label short
+  label=$(reg_field "$key" label)
+  short="${label%% (*}"
+
+  if reg_check_passes "$key"; then
+    track_success "$short"
+    return 0
+  fi
+
+  local pkg
+  for pkg in docker docker-compose docker-buildx; do
+    brew list --formula "$pkg" &>/dev/null && continue
+    track_active "$short ($pkg)..."
+    if ! run_silent brew install "$pkg"; then
+      _clear_active_line
+      track_error "$short ($pkg)"
+      return 1
+    fi
+    _clear_active_line
+  done
+
+  if ! _docker_wire_cli_plugins; then
+    track_error "$short (cli-plugins wiring)"
+    return 1
+  fi
+
+  _finish_registry_key "$key" "$short"
 }
 
 install_git_defaults() {
@@ -406,6 +509,23 @@ install_macos_keyrepeat() {
   _finish_macos_setting "$key"
 }
 
+# Pairs with macos_keyrepeat. Without this, holding a key in any Cocoa text view
+# (VS Code, Xcode, Vim in a Cocoa terminal) opens the accent-picker palette
+# instead of repeating the character — which cancels out most of the benefit of
+# a fast repeat rate.
+install_macos_keyhold() {
+  local key=$1
+  defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false || return 1
+  _finish_macos_setting "$key"
+}
+
+install_macos_extensions() {
+  local key=$1
+  defaults write NSGlobalDomain AppleShowAllExtensions -bool true || return 1
+  _macos_needs_finder_restart=true
+  _finish_macos_setting "$key"
+}
+
 install_macos_finder_hidden() {
   local key=$1
   defaults write com.apple.finder AppleShowAllFiles YES || return 1
@@ -453,6 +573,29 @@ install_macos_hushlogin() {
 
 _clear_active_line() {
   [ -t 1 ] && printf "\033[1A\033[2K"
+}
+
+# Make Homebrew's compose and buildx plugins resolvable by the docker CLI.
+#
+# The CLI searches ~/.docker/cli-plugins unconditionally — no config entry
+# required — so symlinking into it is sufficient. The alternative is adding
+# Homebrew's directory to `cliPluginsExtraDirs` in ~/.docker/config.json, but
+# that file also holds registry credentials (auths, credHelpers) and the active
+# context. Rewriting a credential-bearing file we do not own is a worse trade
+# than a symlink, so we stay out of it entirely.
+#
+# Links point at Homebrew's `opt` path rather than the versioned Cellar path,
+# so they keep resolving across `brew upgrade`.
+_docker_wire_cli_plugins() {
+  local dir="$HOME/.docker/cli-plugins"
+  mkdir -p "$dir" || return 1
+
+  local pkg src
+  for pkg in docker-compose docker-buildx; do
+    src="/opt/homebrew/opt/$pkg/lib/docker/cli-plugins/$pkg"
+    [ -e "$src" ] || return 1
+    ln -sfn "$src" "$dir/$pkg" || return 1
+  done
 }
 
 _git_config_default() {

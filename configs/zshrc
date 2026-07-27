@@ -51,7 +51,6 @@ _mac_dev_has bat && alias cat="bat --paging=never"
 _mac_dev_has fd && alias find="fd"
 _mac_dev_has rg && alias grep="rg"
 _mac_dev_has btop && alias top="btop"
-_mac_dev_has duf && alias df="duf"
 _mac_dev_has dust && alias du="dust"
 if _mac_dev_has nvim; then
   alias vim="nvim"
@@ -90,6 +89,19 @@ _mac_dev_has direnv && eval "$(direnv hook zsh)"
 # atuin (SQLite-backed shell history — Ctrl+R / Up)
 _mac_dev_has atuin && eval "$(atuin init zsh)"
 
+# yazi — `y` instead of `yazi` so quitting with Q lands the shell in the
+# directory you browsed to. Plain `yazi` still works and leaves $PWD alone.
+if _mac_dev_has yazi; then
+  function y() {
+    local tmp cwd
+    tmp="$(mktemp -t yazi-cwd.XXXXXX)" || return 1
+    yazi "$@" --cwd-file="$tmp"
+    IFS= read -r -d '' cwd < "$tmp"
+    [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
+    rm -f -- "$tmp"
+  }
+fi
+
 # Tool launcher (fzf-based)
 function tools() {
   _mac_dev_has fzf || return 1
@@ -97,10 +109,9 @@ function tools() {
   _mac_dev_has btop && cmds+=("btop:시스템 모니터링")
   _mac_dev_has lazygit && cmds+=("lazygit:Git UI")
   _mac_dev_has lazydocker && cmds+=("lazydocker:Docker UI")
-  _mac_dev_has duf && cmds+=("duf:디스크 사용량")
+  _mac_dev_has yazi && cmds+=("yazi:파일 매니저")
   _mac_dev_has dust && cmds+=("dust:폴더 크기 분석")
   _mac_dev_has procs && cmds+=("procs:프로세스 목록")
-  _mac_dev_has tokei && cmds+=("tokei:코드 통계")
   (( ${#cmds[@]} > 0 )) || return 1
 
   local selected=$(printf '%s\n' "${cmds[@]}" | fzf --delimiter=: --with-nth=2 --height=40% --reverse --border --prompt="도구 선택: ")

@@ -65,6 +65,8 @@ Then startup validation catches any typo. Everything else (UI, CI, doctor) picks
 
 **Add a new macOS setting** — add the registry record and a dedicated `install_macos_<key>` function. Use `reg_field "$key" label` for the success message; never hardcode.
 
+**Add a new registry TYPE** — a type is referenced in four places, each with a loud `UNMAPPED TYPE` fallback so a miss is visible rather than silent: the enum in `validate_registry`, `type_ui_title`, `type_log_title` (all `lib/registry.sh`), and `_selection_prompt` (`lib/orchestrator.sh`). Selection order follows registry order, so a type's position in `REGISTRY` decides where it appears in the interactive flow. Types outside `cli|git|runtime|ai` must supply an explicit `CHECK` — `reg_check_passes` has no `command -v` fallback for them.
+
 **Add a new bootstrap step** — add a `bootstrap_<name>` function to `lib/bootstrap.sh` that returns 0/non-zero (never `exit`), then invoke it from `run_bootstrap`. Use `run_interactive` if the step needs the terminal, otherwise `run_with_tee`.
 
 ## Naming conventions
@@ -92,6 +94,7 @@ Then startup validation catches any typo. Everything else (UI, CI, doctor) picks
 - **Registry field separator**: `|` is forbidden inside any field. Pipes in CHECK expressions cause false positives (pipeline exit code is the last command's). Use `&>/dev/null` instead of `| head -1`.
 - **Registry labels**: `LABEL` must not contain `,` because gum receives selected defaults as a comma-separated value.
 - **Catppuccin Mocha** is applied by `lib/configs.sh` to each selected config file that is deployed. It is not a user-selectable option.
+- **Container runtime default is Colima**: it is the only `recommended` runtime in the `container` type because it is MIT-licensed with no commercial-use restriction. OrbStack (paid for commercial use) and Apple `container` (no compose support) are `extra`, and their labels state the caveat. Any runtime here must depend on `docker_cli`.
 - **Bash 3.2 target**: macOS ships bash 3.2. No associative arrays (`declare -A`), no namerefs (`declare -n`), no `mapfile`/`readarray`.
 
 ## Anti-patterns

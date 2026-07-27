@@ -38,6 +38,9 @@ deploy_configs() {
   if _has_key "$keys" git_delta; then
     _configure_delta || return 1
   fi
+  if _has_key "$keys" difftastic; then
+    _configure_difftastic || return 1
+  fi
   if _has_key "$keys" neovim; then
     _configure_neovim || return 1
   fi
@@ -229,6 +232,21 @@ _configure_delta() {
   _config_default delta.side-by-side true || { track_error "Git + delta"; return 1; }
   _config_default delta.syntax-theme "Catppuccin Mocha" || { track_error "Git + delta"; return 1; }
   track_success "Git + delta"
+}
+
+# difftastic is registered as an on-demand difftool rather than as core.pager.
+# It does structural (syntax-aware) diffs, which complements delta instead of
+# replacing it — and its output is not machine-parseable, so making it the
+# default diff would break anything that reads git's output. `git dft` opts in.
+_configure_difftastic() {
+  command -v difft &>/dev/null || return 0
+  # Single quotes are required: git expands $LOCAL/$REMOTE when it runs the
+  # difftool, so they must reach the config file unexpanded.
+  # shellcheck disable=SC2016
+  _config_default difftool.difftastic.cmd 'difft "$LOCAL" "$REMOTE"' || { track_error "Git + difftastic"; return 1; }
+  _config_default difftool.prompt false || { track_error "Git + difftastic"; return 1; }
+  _config_default alias.dft 'difftool --tool difftastic' || { track_error "Git + difftastic"; return 1; }
+  track_success "Git + difftastic"
 }
 
 _config_default() {

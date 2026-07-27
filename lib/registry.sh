@@ -5,7 +5,7 @@
 #   KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | DEPS | CHECK
 #
 #   KEY       snake_case English id, unique, stable
-#   TYPE      shell | font | cli | git | runtime | ai | app | macos
+#   TYPE      shell | font | cli | git | runtime | container | ai | app | macos
 #   LABEL     user-facing display string (Korean allowed)
 #   INSTALLER installer token → dispatch calls install_<INSTALLER>
 #   ARGS      whitespace-separated arguments passed to the installer
@@ -41,6 +41,10 @@ REGISTRY=(
   "font_sarasa|font|Sarasa Gothic (한영 통합)|brew_cask|font-sarasa-gothic|extra||if compgen -G \"$HOME/Library/Fonts/Sarasa*\" >/dev/null; then true; else compgen -G \"/opt/homebrew/share/fonts/Sarasa*\" >/dev/null; fi"
   "font_noto|font|Noto Sans CJK KR (한글)|brew_cask|font-noto-sans-cjk-kr|essential||if compgen -G \"$HOME/Library/Fonts/NotoSansCJKkr*\" >/dev/null; then true; else compgen -G \"/opt/homebrew/share/fonts/NotoSansCJKkr*\" >/dev/null; fi"
   "font_pretendard|font|Pretendard (한글 UI)|brew_cask|font-pretendard|recommended||if compgen -G \"$HOME/Library/Fonts/Pretendard*\" >/dev/null; then true; else compgen -G \"/opt/homebrew/share/fonts/Pretendard*\" >/dev/null; fi"
+  # The only Korean *coding* face here: Noto and Pretendard are UI fonts, and
+  # Sarasa ships no Nerd glyphs. This one covers Hangul and the Starship/eza
+  # icons in a single family.
+  "font_d2coding|font|D2Coding Nerd Font (한글 코딩)|brew_cask|font-d2coding-nerd-font|extra||if compgen -G \"$HOME/Library/Fonts/D2CodingLigatureNerdFont*\" >/dev/null; then true; else compgen -G \"/opt/homebrew/share/fonts/D2CodingLigatureNerdFont*\" >/dev/null; fi"
 
   # CLI — essential (Rust-based modern replacements)
   "gum|cli|gum (UI 툴킷)|brew|gum|essential||brew list --formula gum && command -v gum"
@@ -53,26 +57,40 @@ REGISTRY=(
   # CLI — recommended (productivity)
   "zoxide|cli|zoxide (스마트 cd)|brew|zoxide|recommended||brew list --formula zoxide && command -v zoxide"
   "btop|cli|btop (시스템 모니터)|brew|btop|recommended||brew list --formula btop && command -v btop"
-  "dust|cli|dust (du 대체)|brew|dust|recommended||brew list --formula dust && command -v dust"
-  "duf|cli|duf (df 대체)|brew|duf|recommended||brew list --formula duf && command -v duf"
+  # Demoted from recommended: still maintained, but the du/df-replacement
+  # category is shrinking on macOS and plain `du -sh` covers the default case.
+  "dust|cli|dust (du 대체)|brew|dust|extra||brew list --formula dust && command -v dust"
   "jq|cli|jq (JSON 처리)|brew|jq|recommended||brew list --formula jq && command -v jq"
   "yq|cli|yq (YAML 처리)|brew|yq|recommended||brew list --formula yq && command -v yq"
   "atuin|cli|atuin (쉘 히스토리 DB)|brew|atuin|recommended||brew list --formula atuin && command -v atuin"
   "just|cli|just (명령 러너)|brew|just|recommended||brew list --formula just && command -v just"
   "neovim|cli|Neovim (LazyVim 에디터)|brew|neovim|recommended|git|brew list --formula neovim && command -v nvim"
-  "direnv|cli|direnv (프로젝트 env)|brew|direnv|recommended||brew list --formula direnv && command -v direnv"
+  # Demoted from recommended: redundant with mise, which is `essential` and
+  # already loads per-project env. Kept as an option because direnv's .envrc
+  # is still the more expressive of the two.
+  "direnv|cli|direnv (프로젝트 env)|brew|direnv|extra||brew list --formula direnv && command -v direnv"
   "shellcheck|cli|ShellCheck (쉘 정적 분석)|brew|shellcheck|recommended||brew list --formula shellcheck && command -v shellcheck"
   "shfmt|cli|shfmt (쉘 포맷터)|brew|shfmt|recommended||brew list --formula shfmt && command -v shfmt"
+  "tmux|cli|tmux (터미널 멀티플렉서)|brew|tmux|recommended||brew list --formula tmux && command -v tmux"
+  "ast_grep|cli|ast-grep (구문 트리 검색 및 치환)|brew|ast-grep|recommended||brew list --formula ast-grep && command -v ast-grep"
+  "duckdb|cli|DuckDB (로컬 분석 SQL)|brew|duckdb|extra||brew list --formula duckdb && command -v duckdb"
+  # Provides the `tldr` binary, and Homebrew declares it conflicts_with both
+  # `tldr` and `tlrc` for that reason. Never add either of those as a record —
+  # the install fails on the symlink collision.
+  "tealdeer|cli|tealdeer (tldr 명령어 요약)|brew|tealdeer|extra||brew list --formula tealdeer && command -v tldr"
 
   # CLI — extra
-  "lazydocker|cli|lazydocker (Docker TUI)|brew|lazydocker|extra||brew list --formula lazydocker && command -v lazydocker"
   "glow|cli|glow (마크다운 뷰어)|brew|glow|extra||brew list --formula glow && command -v glow"
   "sd|cli|sd (sed 대체)|brew|sd|extra||brew list --formula sd && command -v sd"
-  "tokei|cli|tokei (코드 통계)|brew|tokei|extra||brew list --formula tokei && command -v tokei"
   "hyperfine|cli|hyperfine (벤치마크)|brew|hyperfine|extra||brew list --formula hyperfine && command -v hyperfine"
   "watchexec|cli|watchexec (파일 변경 실행)|brew|watchexec|extra||brew list --formula watchexec && command -v watchexec"
   "procs|cli|procs (ps 대체)|brew|procs|extra||brew list --formula procs && command -v procs"
   "xh|cli|xh (HTTP 클라이언트)|brew|xh|extra||brew list --formula xh && command -v xh"
+  "actionlint|cli|actionlint (GitHub Actions 린터)|brew|actionlint|extra||brew list --formula actionlint && command -v actionlint"
+  # yazi ships zero runtime deps — every previewer is opt-in (ffmpeg sevenzip
+  # poppler resvg imagemagick) — so a bare install underdelivers. Kept at extra
+  # for that reason plus a declining install trend.
+  "yazi|cli|yazi (터미널 파일 매니저)|brew|yazi|extra||brew list --formula yazi && command -v yazi"
 
   # Git
   "git|git|Git|brew|git|essential||brew list --formula git && command -v git"
@@ -81,19 +99,60 @@ REGISTRY=(
   "lazygit|git|lazygit (Git TUI)|brew|lazygit|recommended|git|brew list --formula lazygit && command -v lazygit"
   "git_delta|git|delta (git diff 강화)|brew|git-delta|recommended|git|brew list --formula git-delta && command -v delta"
   "git_lfs|git|Git LFS|git_lfs||extra|git|brew list --formula git-lfs && command -v git-lfs && git config --global filter.lfs.clean"
+  "difftastic|git|difftastic (구문 인식 diff)|brew|difftastic|extra|git|brew list --formula difftastic && command -v difft"
+  "gitleaks|git|gitleaks (시크릿 스캔)|brew|gitleaks|extra|git|brew list --formula gitleaks && command -v gitleaks"
+  "jj|git|Jujutsu (Git 호환 VCS)|brew|jj|extra|git|brew list --formula jj && command -v jj"
 
   # Runtime — managed by mise except for mise itself and direct package managers
+  #
+  # These CHECKs run the binary (`pnpm --version`) instead of testing for it
+  # (`mise where pnpm && command -v pnpm`). A mise shim is a real file that
+  # exists whether or not a version is active for it, and `mise where` only
+  # proves the install directory is on disk — so the presence-style check passed
+  # while `pnpm` itself exited non-zero with "No version is set for shim".
+  # Executing the binary is the only check that catches an inactive shim.
   "mise|runtime|mise (버전 관리자)|brew|mise|essential||brew list --formula mise && command -v mise"
-  "node|runtime|Node.js LTS|mise|node@lts|essential|mise|mise where node && command -v node && command -v npm"
-  "pnpm|runtime|pnpm (Node 패키지)|mise|pnpm@latest|essential|mise|mise where pnpm && command -v pnpm"
+  "node|runtime|Node.js LTS|mise|node@lts|essential|mise|node --version && npm --version"
+  "pnpm|runtime|pnpm (Node 패키지)|mise|pnpm@latest|essential|mise|pnpm --version"
   "uv|runtime|uv (Python 패키지)|brew|uv|recommended||brew list --formula uv && command -v uv"
-  "python|runtime|Python (최신)|mise|python@latest|recommended|mise|mise where python && command -v python3"
-  "bun|runtime|Bun (JS/TS 런타임)|mise|bun@latest|extra|mise|mise where bun && command -v bun"
-  "go|runtime|Go|mise|go@latest|extra|mise|mise where go && command -v go"
-  "rust|runtime|Rust|mise|rust@latest|extra|mise|mise where rust && command -v rustc"
+  "python|runtime|Python (최신)|mise|python@latest|recommended|mise|python3 --version"
+  "bun|runtime|Bun (JS/TS 런타임)|mise|bun@latest|extra|mise|bun --version"
+  "go|runtime|Go|mise|go@latest|extra|mise|go version"
+  "rust|runtime|Rust|mise|rust@latest|extra|mise|rustc --version"
+  "java|runtime|Java (LTS)|mise|java@lts|extra|mise|java -version"
+
+  # Container — Colima is the default runtime: open source (MIT), no commercial
+  # licence, and it drives the same docker CLI everything else expects. The
+  # alternatives are opt-in because each carries a caveat: OrbStack needs a paid
+  # licence for commercial use, and Apple's container has no compose support.
+  # docker_cli is a DEP of every runtime here — a runtime without the client is
+  # unusable, and Homebrew's compose/buildx plugins need config.json wiring.
+  "docker_cli|container|Docker CLI (compose + buildx 플러그인)|docker_cli||recommended||command -v docker && docker compose version && docker buildx version"
+  "colima|container|Colima (컨테이너 런타임)|brew|colima|recommended|docker_cli|brew list --formula colima && command -v colima"
+  "orbstack|container|OrbStack (GUI 런타임 - 상용 유료)|brew_cask|orbstack|extra||[ -d /Applications/OrbStack.app ]"
+  "apple_container|container|Apple container (macOS 26 전용 - compose 미지원)|brew|container|extra||brew list --formula container && command -v container"
+  "lazydocker|container|lazydocker (컨테이너 TUI)|brew|lazydocker|extra||brew list --formula lazydocker && command -v lazydocker"
+  "trivy|container|trivy (이미지 취약점 스캔)|brew|trivy|extra||brew list --formula trivy && command -v trivy"
+  "hadolint|container|hadolint (Dockerfile 린터)|brew|hadolint|extra||brew list --formula hadolint && command -v hadolint"
+  "cosign|container|cosign (이미지 서명 검증)|brew|cosign|extra||brew list --formula cosign && command -v cosign"
+  "crane|container|crane (레지스트리 조작)|brew|crane|extra||brew list --formula crane && command -v crane"
 
   # AI
-  "claude_code|ai|Claude Code (Anthropic CLI)|brew_cask|claude-code|recommended||command -v claude"
+  # CHECK is presence-based rather than `brew list` for this whole category:
+  # these tools ship self-updating native installers, so a user may legitimately
+  # have them outside Homebrew and re-installing would create a second copy
+  # racing on PATH. Presence is what matters.
+  #
+  # Claude Code uses its vendor installer, not the Homebrew cask, for two
+  # reasons: the docs list it as the recommended path, and a cask install never
+  # auto-updates (it also pins the stable channel, roughly a week behind) while
+  # the native install updates in the background. The CHECK tests the absolute
+  # install path first because setup.sh runs under bash, where ~/.local/bin is
+  # usually not yet on PATH — `command -v` alone would report a fresh install
+  # as failed. The else branch still catches a cask or npm install. The if/else
+  # shape is required because `||` would put the field separator inside a field.
+  "claude_code|ai|Claude Code (Anthropic CLI)|curl_script|https://claude.ai/install.sh|recommended||if [ -x \"$HOME/.local/bin/claude\" ]; then true; else command -v claude; fi"
+  "codex|ai|Codex CLI (OpenAI 코딩 에이전트)|brew_cask|codex|extra||command -v codex"
   "slack_cli|ai|slack-cli (Slack 워크스페이스 CLI + Claude 스킬)|github_script|junyeong-ai/slack-cli|extra|claude_code|[ -x \"$HOME/.local/bin/slack-cli\" ] && [ -f \"$HOME/.claude/skills/slack-workspace/SKILL.md\" ]"
   "atlassian_cli|ai|atlassian-cli (Jira & Confluence CLI + Claude 스킬)|github_script|junyeong-ai/atlassian-cli|extra|claude_code|[ -x \"$HOME/.local/bin/atlassian-cli\" ] && [ -f \"$HOME/.claude/skills/jira-confluence/SKILL.md\" ]"
   "webpilot|ai|webpilot (브라우저 자동화 CLI + Claude 스킬)|github_script|WEBPILOT_NO_SETUP=1 junyeong-ai/web-pilot -- webpilot setup skill --yes|extra|claude_code|[ -x \"$HOME/.local/bin/webpilot\" ] && [ -f \"$HOME/.claude/skills/webpilot/SKILL.md\" ]"
@@ -102,15 +161,19 @@ REGISTRY=(
 
   # Apps
   "app_raycast|app|Raycast (Spotlight 대체)|brew_cask|raycast|recommended||[ -d /Applications/Raycast.app ]"
-  "app_orbstack|app|OrbStack (Docker)|brew_cask|orbstack|recommended||[ -d /Applications/OrbStack.app ]"
   "app_alttab|app|AltTab (윈도우 스위처)|brew_cask|alt-tab|extra||[ -d /Applications/AltTab.app ]"
   "app_stats|app|Stats (시스템 모니터)|brew_cask|stats|extra||[ -d /Applications/Stats.app ]"
   "app_shottr|app|Shottr (스크린샷 + OCR)|brew_cask|shottr|extra||[ -d /Applications/Shottr.app ]"
   "app_vscode|app|Visual Studio Code|brew_cask|visual-studio-code|extra||[ -d '/Applications/Visual Studio Code.app' ]"
+  "app_maccy|app|Maccy (클립보드 관리)|brew_cask|maccy|extra||[ -d /Applications/Maccy.app ]"
 
   # macOS — each setting has its own installer function (install_macos_*)
   "macos_keyrepeat|macos|키 반복 속도 최적화|macos_keyrepeat||recommended||[ \"\$(defaults read NSGlobalDomain KeyRepeat 2>/dev/null)\" = 2 ] && [ \"\$(defaults read NSGlobalDomain InitialKeyRepeat 2>/dev/null)\" = 15 ]"
+  # -bool writes read back as 0/1, unlike macos_finder_hidden below which is
+  # written as the string YES. Keep each CHECK matching what its installer wrote.
+  "macos_keyhold|macos|키 길게 누름 문자 반복|macos_keyhold||recommended||[ \"\$(defaults read NSGlobalDomain ApplePressAndHoldEnabled 2>/dev/null)\" = 0 ]"
   "macos_finder_hidden|macos|Finder 숨김 파일 표시|macos_finder_hidden||recommended||[ \"\$(defaults read com.apple.finder AppleShowAllFiles 2>/dev/null)\" = YES ]"
+  "macos_extensions|macos|파일 확장자 항상 표시|macos_extensions||recommended||[ \"\$(defaults read NSGlobalDomain AppleShowAllExtensions 2>/dev/null)\" = 1 ]"
   "macos_finder_pathbar|macos|Finder 경로 표시줄|macos_finder_pathbar||recommended||[ \"\$(defaults read com.apple.finder ShowPathbar 2>/dev/null)\" = 1 ]"
   "macos_dock|macos|Dock 자동 숨김 + 빠른 애니메이션|macos_dock||recommended||[ \"\$(defaults read com.apple.dock autohide 2>/dev/null)\" = 1 ] && [ \"\$(defaults read com.apple.dock autohide-delay 2>/dev/null)\" = 0 ] && [ \"\$(defaults read com.apple.dock autohide-time-modifier 2>/dev/null)\" = \"0.3\" ]"
   "macos_mission_control|macos|미션 컨트롤 애니메이션 가속|macos_mission_control||recommended||[ \"\$(defaults read com.apple.dock expose-animation-duration 2>/dev/null)\" = \"0.1\" ]"
@@ -236,6 +299,7 @@ type_ui_title() {
     cli)     echo "모던 CLI 도구" ;;
     git)     echo "Git & 협업 도구" ;;
     runtime) echo "개발 런타임" ;;
+    container) echo "컨테이너 & Docker" ;;
     ai)      echo "AI 개발 도구" ;;
     app)     echo "앱 & 생산성" ;;
     macos)   echo "macOS 시스템 설정" ;;
@@ -251,6 +315,7 @@ type_log_title() {
     cli)     echo "CLI Tools" ;;
     git)     echo "Git Tools" ;;
     runtime) echo "Runtimes" ;;
+    container) echo "Containers" ;;
     ai)      echo "AI Tools" ;;
     app)     echo "Apps" ;;
     macos)   echo "macOS Settings" ;;
@@ -322,7 +387,7 @@ validate_registry() {
     fi
 
     case "$type" in
-      shell|font|cli|git|runtime|ai|app|macos) ;;
+      shell|font|cli|git|runtime|container|ai|app|macos) ;;
       *)
         echo "REGISTRY ERROR: invalid type '$type' (key: $k)" >&2
         errors=$((errors + 1))
@@ -361,7 +426,12 @@ validate_registry() {
           errors=$((errors + 1))
         fi
         ;;
-      zinit|git_defaults|git_lfs|macos_*)
+      curl_script)
+        if ! _validate_curl_script_args "$k" "$args"; then
+          errors=$((errors + 1))
+        fi
+        ;;
+      zinit|git_defaults|git_lfs|docker_cli|macos_*)
         if [ "$arg_count" -ne 0 ]; then
           echo "REGISTRY ERROR: installer '$installer' does not accept args (key: $k)" >&2
           errors=$((errors + 1))
@@ -441,6 +511,43 @@ _validate_github_script_args() {
     fi
     if [ "$((after + 1))" -ge "$n" ]; then
       echo "REGISTRY ERROR: installer 'github_script' '--' present but post-install argv is empty (key: $k)" >&2
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# Validate ARGS shape for `curl_script`: <https-url> [-- <argv...>]
+_validate_curl_script_args() {
+  local k=$1 args=$2
+  local IFS=$' \t\n'
+  local -a tokens
+  # shellcheck disable=SC2206
+  tokens=($args)
+
+  local n=${#tokens[@]}
+  if [ "$n" -eq 0 ]; then
+    echo "REGISTRY ERROR: installer 'curl_script' requires an install URL (key: $k)" >&2
+    return 1
+  fi
+
+  # https only — the installer pipes this straight into bash.
+  case "${tokens[0]}" in
+    https://*) ;;
+    *)
+      echo "REGISTRY ERROR: installer 'curl_script' URL must be https, got '${tokens[0]}' (key: $k)" >&2
+      return 1
+      ;;
+  esac
+
+  if [ "$n" -gt 1 ]; then
+    if [ "${tokens[1]}" != "--" ]; then
+      echo "REGISTRY ERROR: installer 'curl_script' expects '--' before post-install argv (key: $k)" >&2
+      return 1
+    fi
+    if [ "$n" -eq 2 ]; then
+      echo "REGISTRY ERROR: installer 'curl_script' '--' present but post-install argv is empty (key: $k)" >&2
       return 1
     fi
   fi

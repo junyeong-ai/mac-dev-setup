@@ -139,6 +139,7 @@ _selection_prompt() {
     cli)     echo "CLI 도구 (essential/recommended는 미리 체크됨):" ;;
     git)     echo "Git & 협업 도구:" ;;
     runtime) echo "런타임 & 패키지 매니저:" ;;
+    container) echo "컨테이너 런타임 (Colima 권장 - 하나만 선택하세요):" ;;
     ai)      echo "AI 도구:" ;;
     app)     echo "앱 선택:" ;;
     macos)   echo "macOS 설정:" ;;
@@ -347,6 +348,17 @@ _show_footer() {
   local step=2
   if echo "$selected_keys_text" | grep -qxF neovim; then
     next_steps+=("  $step. Run 'nvim' once to install plugins")
+    step=$((step + 1))
+  fi
+  # Installing Colima does not boot its VM, and the first start downloads a
+  # disk image. Without this line the user is left with a docker CLI that
+  # cannot reach a daemon and no obvious reason why.
+  if echo "$selected_keys_text" | grep -qxF colima; then
+    next_steps+=("  $step. Run 'colima start' to boot the container VM")
+    step=$((step + 1))
+  fi
+  if echo "$selected_keys_text" | grep -qxF apple_container; then
+    next_steps+=("  $step. Run 'brew services start container' to start its daemon")
     step=$((step + 1))
   fi
   next_steps+=("  $step. Run './setup.sh doctor' to verify")

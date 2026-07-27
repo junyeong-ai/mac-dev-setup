@@ -54,7 +54,7 @@ KEY | TYPE | LABEL | INSTALLER | ARGS | TIER | DEPS | CHECK
 | Field | Meaning |
 |-------|---------|
 | `KEY` | Stable snake_case identifier (`eza`, `claude_code`, `macos_dock`) |
-| `TYPE` | `shell` · `font` · `cli` · `git` · `runtime` · `ai` · `app` · `macos` |
+| `TYPE` | `shell` · `font` · `cli` · `git` · `runtime` · `container` · `ai` · `app` · `macos` |
 | `LABEL` | Display string (Korean allowed) |
 | `INSTALLER` | Dispatch token → `install_<INSTALLER>` function |
 | `ARGS` | Whitespace-separated arguments to the installer |
@@ -83,10 +83,32 @@ Available installer tokens:
 | `npm` | `install_npm` | Global npm package (self-bootstraps Node) |
 | `zinit` | `install_zinit` | Git-clone Zinit plugin manager |
 | `git_lfs` | `install_git_lfs` | Git LFS binary + global filter setup |
+| `docker_cli` | `install_docker_cli` | docker + compose + buildx, and the `cliPluginsExtraDirs` wiring that makes the plugins resolvable |
 | `github_script` | `install_github_script` | Runs an upstream `scripts/install.sh` from `raw.githubusercontent.com/<repo>/main`. ARGS: `[VAR=val ...] <owner/name> [-- <post-install argv...>]` |
+| `curl_script` | `install_curl_script` | Runs a vendor's own install script from an arbitrary https URL. ARGS: `<https-url> [-- <post-install argv...>]` |
 | `macos_<key>` | `install_macos_<key>` | Dedicated macOS defaults writer |
 
 The Catppuccin Mocha theme is applied by `lib/configs.sh` to selected config files as they are deployed — it is not a registry option.
+
+### Container runtime
+
+`Colima` is the default container runtime. It is MIT-licensed with no
+commercial-use restriction, runs on Apple's Virtualization.framework with
+virtiofs mounts, and exposes an ordinary Docker socket — so the standard
+`docker` CLI, compose, and buildx all work unchanged.
+
+| Option | Tier | Trade-off |
+|--------|------|-----------|
+| Colima | `recommended` | Default. Open source, no licence cost. Needs `colima start` to boot its VM. |
+| OrbStack | `extra` | Fastest and most polished, with a GUI — but requires a paid licence for commercial use. |
+| Apple `container` | `extra` | Apple's native runtime, one lightweight VM per container. No Docker Compose support. |
+
+Selecting a runtime automatically pulls in `docker_cli`, which installs
+`docker`, `docker-compose`, and `docker-buildx` **and** symlinks the compose and
+buildx plugins into `~/.docker/cli-plugins/`. That last step is not optional:
+Homebrew installs those plugins somewhere the docker CLI does not search, so
+without it `docker compose` fails with "unknown command" on a fresh machine even
+though the formula is installed.
 
 ### Naming conventions
 

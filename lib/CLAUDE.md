@@ -10,7 +10,7 @@ Loaded when Claude reads files in this directory. See `../CLAUDE.md` for project
 | `ui.sh` | `show_logo`, `track_*`, `ui_*`, Catppuccin Mocha color constants (`C_MAUVE`, `C_BLUE`, ...) |
 | `registry.sh` | `REGISTRY` array, `reg_keys`, `reg_keys_by_type`, `reg_keys_by_tier`, `reg_field`, `reg_check_passes`, `reg_default_keys`, `reg_types`, `type_ui_title`, `type_log_title`, `validate_registry` |
 | `bootstrap.sh` | `ensure_supported_system`, `activate_homebrew`, `activate_mise`, `bootstrap_homebrew`, `bootstrap_homebrew_metadata`, `bootstrap_gum`, `run_bootstrap` |
-| `installers.sh` | `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_github_script`, `install_git_defaults`, `install_git_lfs`, `install_macos_*` |
+| `installers.sh` | `install_key`, `install_brew`, `install_brew_cask`, `install_mise`, `install_npm`, `install_zinit`, `install_github_script`, `install_curl_script`, `install_git_defaults`, `install_git_lfs`, `install_docker_cli`, `install_macos_*` |
 | `orchestrator.sh` | `run_install` |
 | `doctor.sh` | `run_doctor` |
 | `configs.sh` | `deploy_configs` |
@@ -50,6 +50,59 @@ Every function whose name matches `install_<TOKEN>` — including `install_macos
 4. **Log long-running package commands to `$LOG_FILE`**: redirect stdout + stderr of Homebrew, mise, npm, git clone, and setup commands with `>> "$LOG_FILE" 2>&1`.
 5. **Verify through the registry**: after mutating package/config state, call `_finish_registry_key "$key" "$label"` or a wrapper such as `_finish_macos_setting "$key"` so `reg_check_passes` is the success criterion.
 6. **Return discipline**: `return 0` on success, non-zero on failure. Do not call `exit`, do not call `_handle_failure` or any retry logic — `install_key` owns recovery.
+
+## Container runtimes
+
+The `container` type holds the Docker-compatible runtimes. Only one runtime is
+needed, so tiers encode the recommendation rather than a radio-button UI:
+`colima` is `recommended` (MIT, no commercial licence, drives the standard
+docker CLI) while `orbstack` and `apple_container` are `extra`. Their labels
+carry the caveat that makes them opt-in — OrbStack needs a paid licence for
+commercial use, Apple's `container` has no compose support. Selecting more than
+one is harmless; they contend only for the `docker` context at runtime.
+
+`install_docker_cli` is a dedicated installer because installing the formulae
+is not enough. Homebrew puts the compose and buildx plugins in
+`/opt/homebrew/lib/docker/cli-plugins`, which the docker CLI does not search —
+on a fresh machine `docker compose` fails with "unknown command" even though
+`docker-compose` is installed.
+
+`_docker_wire_cli_plugins` fixes that by symlinking both plugins into
+`~/.docker/cli-plugins/`, which the CLI *does* search unconditionally with no
+config file at all. The obvious alternative — adding Homebrew's directory to
+`cliPluginsExtraDirs` in `~/.docker/config.json` — was rejected because that
+file also holds registry credentials (`auths`, `credHelpers`) and the active
+context; rewriting a credential-bearing file we do not own is a worse trade than
+a symlink. Links target Homebrew's `opt` path, not the versioned Cellar path, so
+they survive `brew upgrade`.
+
+The registry CHECK for `docker_cli` runs `docker compose version` and
+`docker buildx version`, not just `command -v` — the plugin wiring is the thing
+that actually breaks, so the check has to exercise it. Neither subcommand needs
+a running daemon, so the check stays valid with the VM stopped. For the same
+reason `colima`'s CHECK does not call `colima status`: a stopped VM is normal,
+not baseline drift.
+
+## AI tools: presence-based CHECK
+
+Every record in the `ai` type verifies with presence (`command -v <bin>`, or an
+absolute path) rather than `brew list`. This is deliberate. These tools ship
+self-updating native installers, so a user may legitimately have one outside
+Homebrew — and demanding brew ownership would make `install_brew_cask` install a
+second copy that then races the first on PATH. Presence is the property that
+matters.
+
+`claude_code` uses `curl_script` with the vendor installer rather than the
+Homebrew cask: the official docs list the native install as the recommended
+path, and a cask install never auto-updates while also pinning the stable
+channel (roughly a week behind). Its CHECK tests `$HOME/.local/bin/claude`
+before falling back to `command -v`, because setup.sh runs under bash where
+`~/.local/bin` is usually not yet on PATH — `command -v` alone would report a
+successful fresh install as a failure.
+
+Note the CHECK uses `if ...; then true; else ...; fi` rather than `||`. That is
+not style: `|` is the record separator, so `||` inside any field breaks the
+schema. `validate_registry` rejects it at startup.
 
 ## Per-tool isolation
 
